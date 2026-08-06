@@ -144,32 +144,57 @@ THEMES = {
 
 # ── 微信风格开关（胶囊形 Toggle） ──────────────────────────────────
 class _Switch(tk.Canvas):
-    """胶囊形开关：on=绿色，off=灰；点击切换，回调可选。"""
+    """胶囊形开关：on=绿色，off=灰；点击切换，回调可选。PIL 高倍率渲染，边缘平滑无锯齿。"""
 
     ON_COLOR = "#07c160"
 
     def __init__(self, master, var, off_color="#d8d8d8", width=None, height=None, on_change=None):
-        super().__init__(master, width=width or ui(46), height=height or ui(24),
+        self._sw_w = width or ui(46)
+        self._sw_h = height or ui(24)
+        super().__init__(master, width=self._sw_w, height=self._sw_h,
                          bg=master.cget("bg"), highlightthickness=0, bd=0, cursor="hand2")
         self.var = var
         self.off_color = off_color
         self.on_change = on_change
+        self._photo = None
         self.bind("<Button-1>", self._on_click)
         self._draw()
 
     def _draw(self):
-        self.delete("all")
-        on = bool(self.var.get())
-        w = int(self["width"])
-        h = int(self["height"])
-        r = h // 2
-        color = self.ON_COLOR if on else self.off_color
-        self.create_oval(0, 0, h, h, fill=color, outline=color)
-        self.create_rectangle(r, 0, w - r, h, fill=color, outline=color)
-        self.create_oval(w - h, 0, w, h, fill=color, outline=color)
-        kx = (w - h + r) if on else r
-        pad = max(2, h // 6)
-        self.create_oval(kx - r + pad, pad, kx + r - pad, h - pad, fill="white", outline="")
+        try:
+            from PIL import Image as _Img, ImageDraw as _IDraw, ImageTk as _ITk
+            w, h = self._sw_w, self._sw_h
+            ss = 4  # 4 倍超采样
+            W, H = w * ss, h * ss
+            img = _Img.new("RGBA", (W, H), (0, 0, 0, 0))
+            d = _IDraw.Draw(img)
+            on = bool(self.var.get())
+            color = self.ON_COLOR if on else self.off_color
+            d.rounded_rectangle((0, 0, W - 1, H - 1), radius=H // 2, fill=color)
+            # 内圈高光（轻微立体感）
+            d.rounded_rectangle((int(W*0.04), int(H*0.12), int(W*0.96), int(H*0.88)), radius=int(H*0.36),
+                                outline=(255, 255, 255, 60), width=max(1, int(H*0.04)))
+            # 滑块
+            r = H // 2
+            kx = (W - H + r) if on else r
+            pad = max(2, H // 7)
+            d.ellipse((kx - r + pad, pad, kx + r - pad, H - pad), fill=(255, 255, 255, 255))
+            img = img.resize((w, h), _Img.Resampling.LANCZOS)
+            self._photo = _ITk.PhotoImage(img)
+            self.delete("all")
+            self.create_image(0, 0, image=self._photo, anchor="nw")
+        except Exception:
+            self.delete("all")
+            on = bool(self.var.get())
+            w, h = self._sw_w, self._sw_h
+            r = h // 2
+            color = self.ON_COLOR if on else self.off_color
+            self.create_oval(0, 0, h, h, fill=color, outline=color)
+            self.create_rectangle(r, 0, w - r, h, fill=color, outline=color)
+            self.create_oval(w - h, 0, w, h, fill=color, outline=color)
+            kx = (w - h + r) if on else r
+            pad = max(2, h // 6)
+            self.create_oval(kx - r + pad, pad, kx + r - pad, h - pad, fill="white", outline="")
 
     def _on_click(self, _event):
         self.var.set(not bool(self.var.get()))
@@ -2574,7 +2599,7 @@ class MediaSorterApp:
         self.apply_window_icon(dialog)
 
         auto_var = tk.BooleanVar(value=self.auto_refresh_enabled)
-        theme_var = tk.StringVar(value=self.theme_name)
+        dark_var = tk.BooleanVar(value=(self.theme_name == "dark"))
         img_var = tk.StringVar(value=", ".join(self.get_image_ext()))
         vid_var = tk.StringVar(value=", ".join(self.get_video_ext()))
         conflict_var = tk.StringVar(value=self.config.get("conflict_strategy", "rename"))
@@ -2645,8 +2670,8 @@ class MediaSorterApp:
         group_title("基础")
         add_row("自动刷新当前目录", "目录内容变化时自动重新扫描",
                 lambda p: _Switch(p, auto_var, off_color=t["hover_bg"]))
-        add_row("外观主题", "界面配色方案",
-                lambda p: _theme_control(p, t, theme_var))
+        add_row("深色模式", "界面使用深色配色",
+                lambda p: _Switch(p, dark_var, off_color=t["hover_bg"]))
 
         # ── 文件类型 ──
         group_title("文件类型")
@@ -2704,7 +2729,7 @@ class MediaSorterApp:
                 self.start_auto_refresh()
             else:
                 self.stop_auto_refresh()
-            target_theme = theme_var.get()
+            target_theme = "dark" if dark_var.get() else "light"
             self.save_config()
             saved["done"] = True
             try:
