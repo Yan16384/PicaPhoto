@@ -1,0 +1,6 @@
+﻿__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+album_config.json

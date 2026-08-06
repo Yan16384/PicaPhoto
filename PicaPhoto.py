@@ -12,60 +12,202 @@ from tkinter import ttk, filedialog, messagebox, Toplevel
 
 from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageFont
 
+# 图片工具必须能处理高分辨率大图（手机照片、超长截图可超过 1 亿像素）。
+# 放开 PIL 默认 8900 万像素上限，避免 DecompressionBomb 警告/报错。
+Image.MAX_IMAGE_PIXELS = None
+
 try:
     import cv2
 except Exception:
     cv2 = None
 
+try:
+    import ctypes
+except Exception:
+    ctypes = None
+
+
+# ── Windows 高分屏适配 ─────────────────────────────────────────────
+def _enable_dpi_awareness() -> None:
+    """声明进程 DPI 感知，避免 tkinter 被系统按位图放大导致界面模糊。"""
+    if sys.platform != "win32" or ctypes is None:
+        return
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def _get_system_dpi() -> float:
+    """返回系统逻辑 DPI（默认 96）。"""
+    if sys.platform != "win32" or ctypes is None:
+        return 96.0
+    try:
+        dpi = int(ctypes.windll.user32.GetDpiForSystem())
+        if dpi > 0:
+            return float(dpi)
+    except Exception:
+        pass
+    return 96.0
+
+
+def _get_primary_scale() -> float:
+    """主显示器 UI 缩放系数：125% → 1.25，200% → 2.0。"""
+    if sys.platform != "win32" or ctypes is None:
+        return 1.0
+    try:
+        pct = int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
+        if pct > 0:
+            return pct / 100.0
+    except Exception:
+        pass
+    try:
+        dpi = int(ctypes.windll.user32.GetDpiForSystem())
+        if dpi > 0:
+            return dpi / 96.0
+    except Exception:
+        pass
+    return 1.0
+
+
+_enable_dpi_awareness()
+UI_SCALE = _get_primary_scale()
+
+
+def ui(v: float) -> int:
+    """把设计稿像素按系统缩放换算为实际像素。"""
+    return max(1, int(round(v * UI_SCALE)))
+
+
 CONFIG_FILE = "album_config.json"
 DEFAULT_IMAGE_EXT = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"]
 DEFAULT_VIDEO_EXT = [".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v"]
-THUMB_SIZE = (160, 160)
-PREVIEW_GAP = 12
-ALBUM_BAR_HEIGHT = 100
-SIDEBAR_WIDTH = 250
+THUMB_SIZE = (ui(160), ui(160))
+PREVIEW_GAP = ui(12)
+ALBUM_BAR_HEIGHT = ui(100)
+SIDEBAR_WIDTH = ui(250)
 AUTO_REFRESH_MS = 5000
 MAX_WORKERS = max(4, min(16, os.cpu_count() or 4))
 
 THEMES = {
+    # 深色：飞书/微信深色风格（深蓝灰 + 品牌蓝）
     "dark": {
-        "root_bg": "#0f1117",
-        "main_bg": "#141824",
-        "panel_bg": "#1a2030",
-        "card_bg": "#252d42",
-        "hover_bg": "#303c59",
-        "border": "#364361",
-        "text": "#f5f7ff",
-        "subtext": "#9aa7c7",
-        "accent": "#5b8cff",
-        "green": "#19c37d",
+        "root_bg": "#17181c",
+        "main_bg": "#1f2128",
+        "panel_bg": "#262931",
+        "card_bg": "#2e323b",
+        "hover_bg": "#3a3f4b",
+        "border": "#333844",
+        "text": "#f2f4f8",
+        "subtext": "#9aa3b2",
+        "accent": "#4d8dff",
+        "accent_hover": "#6ea2ff",
+        "accent_soft": "#1f2c47",
+        "green": "#2fd08a",
         "yellow": "#f4c95d",
         "red": "#ff6b6b",
-        "status_bg": "#121725",
+        "status_bg": "#1a1c21",
+        "input_bg": "#1f2128",
+        "divider": "#2b2f38",
     },
+    # 浅色：微信/飞书浅色风格（浅灰底 + 白卡片 + 飞书蓝）
     "light": {
-        "root_bg": "#f6f8fc",
+        "root_bg": "#f2f3f5",
         "main_bg": "#ffffff",
-        "panel_bg": "#eef3fb",
-        "card_bg": "#e3ebf9",
-        "hover_bg": "#d8e3f7",
-        "border": "#c9d5ec",
-        "text": "#162033",
-        "subtext": "#62708f",
-        "accent": "#3d74ff",
-        "green": "#2e7d32",
-        "yellow": "#c49000",
-        "red": "#d32f2f",
-        "status_bg": "#eaf0fb",
+        "panel_bg": "#ffffff",
+        "card_bg": "#f5f7fa",
+        "hover_bg": "#ebeff5",
+        "border": "#e4e6eb",
+        "text": "#1f2329",
+        "subtext": "#8a919f",
+        "accent": "#3370ff",
+        "accent_hover": "#5c8dff",
+        "accent_soft": "#eef3ff",
+        "green": "#00b578",
+        "yellow": "#c9a227",
+        "red": "#e54545",
+        "status_bg": "#f7f8fa",
+        "input_bg": "#ffffff",
+        "divider": "#eceef2",
     },
 }
+
+# ── 微信风格开关（胶囊形 Toggle） ──────────────────────────────────
+class _Switch(tk.Canvas):
+    """胶囊形开关：on=绿色，off=灰；点击切换，回调可选。"""
+
+    ON_COLOR = "#07c160"
+
+    def __init__(self, master, var, off_color="#d8d8d8", width=None, height=None, on_change=None):
+        super().__init__(master, width=width or ui(46), height=height or ui(24),
+                         bg=master.cget("bg"), highlightthickness=0, bd=0, cursor="hand2")
+        self.var = var
+        self.off_color = off_color
+        self.on_change = on_change
+        self.bind("<Button-1>", self._on_click)
+        self._draw()
+
+    def _draw(self):
+        self.delete("all")
+        on = bool(self.var.get())
+        w = int(self["width"])
+        h = int(self["height"])
+        r = h // 2
+        color = self.ON_COLOR if on else self.off_color
+        self.create_oval(0, 0, h, h, fill=color, outline=color)
+        self.create_rectangle(r, 0, w - r, h, fill=color, outline=color)
+        self.create_oval(w - h, 0, w, h, fill=color, outline=color)
+        kx = (w - h + r) if on else r
+        pad = max(2, h // 6)
+        self.create_oval(kx - r + pad, pad, kx + r - pad, h - pad, fill="white", outline="")
+
+    def _on_click(self, _event):
+        self.var.set(not bool(self.var.get()))
+        self._draw()
+        if self.on_change:
+            self.on_change()
+
+
+def _theme_control(parent, t, theme_var):
+    """外观主题单选控件。"""
+    f = tk.Frame(parent, bg=t["main_bg"])
+    for text, val in (("浅色", "light"), ("深色", "dark")):
+        ttk.Radiobutton(f, text=text, value=val, variable=theme_var, style="TRadiobutton").pack(side=tk.LEFT, padx=(0, ui(10)))
+    return f
+
+
+def _conflict_combo(parent, t, items, var, holder):
+    """重名策略下拉控件，并把实例存入 holder 供保存时读取。"""
+    combo = ttk.Combobox(parent, state="readonly", width=14, font=("微软雅黑", 10))
+    combo["values"] = [label for label, _v in items]
+    current_label = next((label for label, v in items if v == var.get()), items[0][0])
+    combo.set(current_label)
+    holder["combo"] = combo
+    return combo
 
 
 class MediaSorterApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("PicaPhoto")
-        self.root.geometry("1500x920")
+        self.root.geometry(f"{ui(1500)}x{ui(920)}")
+        try:
+            # Tk 点-像素换算：DPI 感知进程里 winfo_fpixels("1i") 返回当前 DPI，
+            # 用它设置 tk scaling 让文字随系统缩放同步变大、不发虚。
+            phys_dpi = float(self.root.winfo_fpixels("1i")) or _get_system_dpi() or 96.0
+            self.root.tk.call("tk", "scaling", max(1.0, phys_dpi / 72.0))
+        except Exception:
+            pass
         try:
             self.root.state("zoomed")
         except Exception:
@@ -79,7 +221,7 @@ class MediaSorterApp:
         self._closed = False
 
         self.config = self.load_config()
-        self.theme_name = self.config.get("theme", "dark")
+        self.theme_name = self.config.get("theme", "light")
         self.theme = THEMES.get(self.theme_name, THEMES["dark"])
 
         self.root_dir = ""
@@ -155,7 +297,7 @@ class MediaSorterApp:
         else:
             cfg = {}
         cfg.setdefault("albums", [])
-        cfg.setdefault("theme", "dark")
+        cfg.setdefault("theme", "light")
         cfg.setdefault("auto_refresh", False)
         cfg.setdefault("image_ext", DEFAULT_IMAGE_EXT[:])
         cfg.setdefault("video_ext", DEFAULT_VIDEO_EXT[:])
@@ -328,35 +470,132 @@ class MediaSorterApp:
     def configure_ttk(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
+        t = self.theme
+        # 通用按钮：扁平、留白充足（飞书式）
         self.style.configure(
             "TButton",
             font=("微软雅黑", 10),
-            padding=6,
-            background=self.theme["card_bg"],
-            foreground=self.theme["text"],
-            bordercolor=self.theme["border"],
+            padding=(ui(14), ui(7)),
+            background=t["card_bg"],
+            foreground=t["text"],
+            bordercolor=t["card_bg"],
+            lightcolor=t["card_bg"],
+            darkcolor=t["card_bg"],
+            relief="flat",
+            focusthickness=0,
         )
-        self.style.map("TButton", background=[("active", self.theme["hover_bg"])])
+        self.style.map(
+            "TButton",
+            background=[("active", t["hover_bg"]), ("pressed", t["hover_bg"])],
+            bordercolor=[("active", t["hover_bg"]), ("pressed", t["hover_bg"])],
+        )
+        # 主操作按钮：品牌蓝
+        self.style.configure(
+            "Accent.TButton",
+            font=("微软雅黑", 10, "bold"),
+            padding=(ui(16), ui(7)),
+            background=t["accent"],
+            foreground="#ffffff",
+            bordercolor=t["accent"],
+            lightcolor=t["accent"],
+            darkcolor=t["accent"],
+            relief="flat",
+            focusthickness=0,
+        )
+        self.style.map(
+            "Accent.TButton",
+            background=[("active", t["accent_hover"]), ("pressed", t["accent_hover"])],
+            bordercolor=[("active", t["accent_hover"]), ("pressed", t["accent_hover"])],
+        )
+        # 输入框
+        self.style.configure(
+            "TEntry",
+            fieldbackground=t["input_bg"],
+            foreground=t["text"],
+            insertcolor=t["text"],
+            bordercolor=t["border"],
+            lightcolor=t["border"],
+            darkcolor=t["border"],
+            padding=(ui(8), ui(6)),
+            relief="flat",
+        )
+        self.style.map("TEntry", bordercolor=[("focus", t["accent"])])
+        # 目录树
         self.style.configure(
             "Treeview",
-            background=self.theme["panel_bg"],
-            foreground=self.theme["text"],
-            fieldbackground=self.theme["panel_bg"],
-            rowheight=26,
-            bordercolor=self.theme["border"],
+            background=t["panel_bg"],
+            foreground=t["text"],
+            fieldbackground=t["panel_bg"],
+            rowheight=ui(30),
+            bordercolor=t["border"],
             font=("微软雅黑", 10),
         )
         self.style.map(
             "Treeview",
-            background=[("selected", self.theme["accent"])],
-            foreground=[("selected", "white")],
+            background=[("selected", t["accent_soft"]), ("active", t["hover_bg"])],
+            foreground=[("selected", t["accent"])],
         )
         self.style.configure(
             "Treeview.Heading",
-            background=self.theme["card_bg"],
-            foreground=self.theme["text"],
+            background=t["panel_bg"],
+            foreground=t["subtext"],
             font=("微软雅黑", 10, "bold"),
+            relief="flat",
         )
+        self.style.map("Treeview.Heading", background=[("active", t["hover_bg"])])
+        # 滚动条
+        self.style.configure(
+            "TScrollbar",
+            background=t["border"],
+            troughcolor=t["panel_bg"],
+            bordercolor=t["panel_bg"],
+            arrowcolor=t["subtext"],
+            relief="flat",
+        )
+        self.style.map("TScrollbar", background=[("active", t["accent"])])
+        # 复选框 / 单选按钮（clam 主题渲染更平滑，去锯齿）
+        self.style.configure(
+            "TCheckbutton",
+            background=t["panel_bg"],
+            foreground=t["text"],
+            font=("微软雅黑", 10),
+            focusthickness=0,
+            padding=(0, ui(5)),
+            indicatorcolor=t["accent_soft"],
+        )
+        self.style.map(
+            "TCheckbutton",
+            background=[("active", t["panel_bg"])],
+            foreground=[("active", t["text"])],
+        )
+        self.style.configure(
+            "TRadiobutton",
+            background=t["panel_bg"],
+            foreground=t["text"],
+            font=("微软雅黑", 10),
+            focusthickness=0,
+            padding=(0, ui(5)),
+            indicatorcolor=t["accent_soft"],
+        )
+        self.style.map(
+            "TRadiobutton",
+            background=[("active", t["panel_bg"])],
+            foreground=[("active", t["text"])],
+        )
+        # 微调框
+        self.style.configure(
+            "TSpinbox",
+            fieldbackground=t["input_bg"],
+            foreground=t["text"],
+            arrowcolor=t["subtext"],
+            bordercolor=t["border"],
+            lightcolor=t["border"],
+            darkcolor=t["border"],
+            padding=(ui(8), ui(4)),
+            relief="flat",
+            insertcolor=t["text"],
+        )
+        self.style.map("TSpinbox", bordercolor=[("focus", t["accent"])])
 
     def switch_theme(self, theme_name: str):
         if theme_name not in THEMES:
@@ -383,6 +622,7 @@ class MediaSorterApp:
 
     def restyle_widgets(self):
         t = self.theme
+        self.configure_ttk()
         self.top_bar.configure(bg=t["root_bg"])
         self.main_container.configure(bg=t["root_bg"])
         self.sidebar_frame.configure(bg=t["panel_bg"], highlightbackground=t["border"], highlightthickness=1)
@@ -391,32 +631,30 @@ class MediaSorterApp:
         self.single_canvas.configure(bg=t["main_bg"])
         self.preview_frame.configure(bg=t["root_bg"])
         self.preview_canvas.configure(bg=t["main_bg"])
-        self.preview_ops_bar.configure(bg=t["panel_bg"])
-        self.bottom_bar.configure(bg=t["panel_bg"])
+        self.preview_ops_bar.configure(bg=t["panel_bg"], highlightbackground=t["border"], highlightthickness=1)
+        self.bottom_bar.configure(bg=t["panel_bg"], highlightbackground=t["border"], highlightthickness=1)
         self.album_canvas.configure(bg=t["panel_bg"])
         self.album_frame.configure(bg=t["panel_bg"])
-        self.status_bar.configure(bg=t["status_bg"], fg=t["accent"])
+        self.status_bar.configure(bg=t["status_bg"], fg=t["subtext"])
         self.path_label.configure(bg=t["root_bg"], fg=t["text"])
-        self.tree_label.configure(bg=t["panel_bg"], fg=t["text"])
-        self.recent_ops_label.configure(bg=t["panel_bg"], fg=t["text"])
-        self.recent_ops_list.configure(bg=t["main_bg"], fg=t["text"], selectbackground=t["accent"], selectforeground="white", highlightbackground=t["border"])
+        self.tree_label.configure(bg=t["panel_bg"], fg=t["subtext"])
+        self.recent_ops_label.configure(bg=t["panel_bg"], fg=t["subtext"])
+        self.recent_ops_list.configure(bg=t["card_bg"], fg=t["text"], selectbackground=t["accent_soft"], selectforeground=t["accent"], highlightbackground=t["border"], highlightthickness=1)
         self.brand_badge.configure(bg=t["accent"], fg="white")
         self.mode_label.configure(bg=t["root_bg"], fg=t["subtext"])
-        self.selection_label.configure(bg=t["panel_bg"], fg=t["text"])
-        self.add_album_btn.configure(bg=t["accent"], fg="white", activebackground=t["accent"])
-        self.settings_btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
-        self.select_dir_btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
-        self.open_folder_btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
-        self.preview_toggle_btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
-        self.undo_btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
+        self.selection_label.configure(bg=t["panel_bg"], fg=t["accent"])
+        self.add_album_btn.configure(bg=t["accent"], fg="white", activebackground=t["accent_hover"])
+        self.select_dir_btn.configure(bg=t["accent"], fg="white", activebackground=t["accent_hover"])
+        for btn in (self.settings_btn, self.open_folder_btn, self.preview_toggle_btn, self.undo_btn):
+            btn.configure(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
 
-    # -------------------------- UI --------------------------
     def build_ui(self):
         self.configure_ttk()
         t = self.theme
 
+        # ── 顶部栏：品牌 + 路径 + 右侧操作（飞书式） ──
         self.top_bar = tk.Frame(self.root, bg=t["root_bg"])
-        self.top_bar.pack(fill=tk.X, padx=14, pady=(12, 6))
+        self.top_bar.pack(fill=tk.X, padx=ui(18), pady=(ui(12), ui(8)))
 
         self.brand_badge = tk.Label(
             self.top_bar,
@@ -426,68 +664,81 @@ class MediaSorterApp:
             bg=t["accent"],
             fg="white",
             font=("Segoe UI", 10, "bold"),
-            padx=12,
-            pady=6,
+            padx=ui(10),
+            pady=ui(5),
+            highlightthickness=0,
         )
-        self.brand_badge.pack(side=tk.LEFT, padx=(0, 10))
+        self.brand_badge.pack(side=tk.LEFT, padx=(0, ui(14)))
 
         self.path_label = tk.Label(self.top_bar, text="未选择目录", bg=t["root_bg"], fg=t["text"], font=("微软雅黑", 12, "bold"), anchor="w")
-        self.path_label.pack(side=tk.LEFT, padx=(0, 14))
-
-        self.select_dir_btn = tk.Button(self.top_bar, text="选择目录", command=self.select_root_dir, bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=t["hover_bg"])
-        self.select_dir_btn.pack(side=tk.LEFT, padx=4)
-
-        self.open_folder_btn = tk.Button(self.top_bar, text="打开当前文件夹", command=self.open_current_folder, bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=t["hover_bg"])
-        self.open_folder_btn.pack(side=tk.LEFT, padx=4)
-
-        self.preview_toggle_btn = tk.Button(self.top_bar, text="资源预览 Tab", command=self.toggle_preview_mode, bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=t["hover_bg"])
-        self.preview_toggle_btn.pack(side=tk.LEFT, padx=4)
-
-        self.undo_btn = tk.Button(self.top_bar, text="撤销 Ctrl+Z", command=self.undo_last_move, bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=t["hover_bg"])
-        self.undo_btn.pack(side=tk.LEFT, padx=4)
-
-        self.settings_btn = tk.Button(self.top_bar, text="设置", command=self.open_settings_dialog, bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=t["hover_bg"])
-        self.settings_btn.pack(side=tk.LEFT, padx=4)
+        self.path_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, ui(12)))
 
         self.mode_label = tk.Label(self.top_bar, text="单图模式 · 滚轮切换", bg=t["root_bg"], fg=t["subtext"], font=("微软雅黑", 10), anchor="e")
-        self.mode_label.pack(side=tk.RIGHT, padx=(12, 0))
+        self.mode_label.pack(side=tk.RIGHT, padx=(ui(12), 0))
 
+        def _tool(parent, text, command, primary=False):
+            kw = dict(
+                command=command, relief=tk.FLAT, font=("微软雅黑", 10),
+                padx=ui(10), pady=ui(5), bd=0, highlightthickness=0, cursor="hand2",
+            )
+            if primary:
+                kw.update(bg=t["accent"], fg="white", activebackground=t["accent_hover"])
+            else:
+                kw.update(bg=t["card_bg"], fg=t["text"], activebackground=t["hover_bg"])
+            return tk.Button(parent, text=text, **kw)
+
+        # 右侧按钮组（从右到左：设置、撤销、预览、打开文件夹、选择目录）
+        self.settings_btn = _tool(self.top_bar, "设置", self.open_settings_dialog)
+        self.settings_btn.pack(side=tk.RIGHT, padx=(ui(6), 0))
+        self.undo_btn = _tool(self.top_bar, "撤销 Ctrl+Z", self.undo_last_move)
+        self.undo_btn.pack(side=tk.RIGHT, padx=(ui(6), 0))
+        self.preview_toggle_btn = _tool(self.top_bar, "资源预览 Tab", self.toggle_preview_mode)
+        self.preview_toggle_btn.pack(side=tk.RIGHT, padx=(ui(6), 0))
+        self.open_folder_btn = _tool(self.top_bar, "打开文件夹", self.open_current_folder)
+        self.open_folder_btn.pack(side=tk.RIGHT, padx=(ui(6), 0))
+        self.select_dir_btn = _tool(self.top_bar, "选择目录", self.select_root_dir, primary=True)
+        self.select_dir_btn.pack(side=tk.RIGHT, padx=(ui(6), 0))
+
+        # ── 主体：左侧导航栏 + 右侧内容区（微信式侧栏） ──
         self.main_container = tk.Frame(self.root, bg=t["root_bg"])
-        self.main_container.pack(fill=tk.BOTH, expand=True, padx=14, pady=6)
+        self.main_container.pack(fill=tk.BOTH, expand=True, padx=ui(18), pady=ui(4))
 
         self.sidebar_frame = tk.Frame(self.main_container, bg=t["panel_bg"], width=SIDEBAR_WIDTH, highlightbackground=t["border"], highlightthickness=1)
         self.sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.sidebar_frame.pack_propagate(False)
 
-        self.tree_label = tk.Label(self.sidebar_frame, text="资源目录", bg=t["panel_bg"], fg=t["text"], font=("微软雅黑", 11, "bold"), anchor="w")
-        self.tree_label.pack(fill=tk.X, padx=10, pady=(10, 6))
+        self.tree_label = tk.Label(self.sidebar_frame, text="资源目录", bg=t["panel_bg"], fg=t["subtext"], font=("微软雅黑", 10, "bold"), anchor="w")
+        self.tree_label.pack(fill=tk.X, padx=ui(12), pady=(ui(12), ui(6)))
 
         self.tree = ttk.Treeview(self.sidebar_frame, show="tree")
-        self.tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=ui(8), pady=(0, ui(6)))
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.tree.bind("<Button-3>", self.on_tree_right_click)
 
-        self.recent_ops_label = tk.Label(self.sidebar_frame, text="最近操作", bg=t["panel_bg"], fg=t["text"], font=("微软雅黑", 10, "bold"), anchor="w")
-        self.recent_ops_label.pack(fill=tk.X, padx=10, pady=(2, 4))
+        tk.Frame(self.sidebar_frame, bg=t["divider"], height=1).pack(fill=tk.X, padx=ui(10), pady=(0, ui(4)))
+
+        self.recent_ops_label = tk.Label(self.sidebar_frame, text="最近操作", bg=t["panel_bg"], fg=t["subtext"], font=("微软雅黑", 10, "bold"), anchor="w")
+        self.recent_ops_label.pack(fill=tk.X, padx=ui(12), pady=(ui(4), ui(4)))
         recent_bar = tk.Frame(self.sidebar_frame, bg=t["panel_bg"])
-        recent_bar.pack(fill=tk.BOTH, expand=False, padx=8, pady=(0, 8))
-        self.recent_ops_list = tk.Listbox(recent_bar, height=8, bg=t["main_bg"], fg=t["text"], selectbackground=t["accent"], selectforeground="white", highlightthickness=1, highlightbackground=t["border"], relief=tk.FLAT, font=("微软雅黑", 9))
+        recent_bar.pack(fill=tk.BOTH, expand=False, padx=ui(8), pady=(0, ui(8)))
+        self.recent_ops_list = tk.Listbox(recent_bar, height=8, bg=t["card_bg"], fg=t["text"], selectbackground=t["accent_soft"], selectforeground=t["accent"], highlightthickness=1, highlightbackground=t["border"], relief=tk.FLAT, font=("微软雅黑", 9))
         self.recent_ops_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        recent_scroll = ttk.Scrollbar(recent_bar, orient=tk.VERTICAL, command=self.recent_ops_list.yview)
-        recent_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.recent_ops_list.configure(yscrollcommand=recent_scroll.set)
+        self.recent_scroll = ttk.Scrollbar(recent_bar, orient=tk.VERTICAL, command=self.recent_ops_list.yview)
+        self.recent_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.recent_ops_list.configure(yscrollcommand=self.recent_scroll.set)
         self.recent_ops_list.bind("<Double-Button-1>", lambda e: self.open_current_folder())
 
         self.right_frame = tk.Frame(self.main_container, bg=t["root_bg"])
-        self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
+        self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(ui(12), 0))
 
+        # 单图模式画布
         self.single_frame = tk.Frame(self.right_frame, bg=t["main_bg"])
         self.single_frame.pack(fill=tk.BOTH, expand=True)
-
         self.single_canvas = tk.Canvas(self.single_frame, bg=t["main_bg"], highlightthickness=0)
         self.single_canvas.pack(fill=tk.BOTH, expand=True)
         self.single_canvas.bind("<Button-3>", self.on_single_right_click)
 
+        # 预览模式
         self.preview_frame = tk.Frame(self.right_frame, bg=t["root_bg"])
         self.preview_canvas = tk.Canvas(self.preview_frame, bg=t["main_bg"], highlightthickness=0)
         self.preview_vbar = ttk.Scrollbar(self.preview_frame, orient=tk.VERTICAL, command=self.preview_canvas.yview)
@@ -503,26 +754,28 @@ class MediaSorterApp:
         self.preview_canvas.bind("<Motion>", self.on_preview_motion)
         self.preview_canvas.bind("<Leave>", self.on_preview_leave)
 
-        self.preview_ops_bar = tk.Frame(self.root, bg=t["panel_bg"], height=44)
-        self.selection_label = tk.Label(self.preview_ops_bar, text="0 个已选择", bg=t["panel_bg"], fg=t["text"], font=("微软雅黑", 11))
-        self.selection_label.pack(side=tk.LEFT, padx=16)
-        ttk.Button(self.preview_ops_bar, text="全选", command=self.select_all_in_preview).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.preview_ops_bar, text="取消全选", command=self.clear_preview_selection).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.preview_ops_bar, text="批量移动", command=self.move_selected_to_album_dialog).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.preview_ops_bar, text="移回未整理", command=self.move_selected_back_to_unsorted).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.preview_ops_bar, text="关闭预览", command=self.exit_preview_mode).pack(side=tk.RIGHT, padx=16)
+        # 预览操作条
+        self.preview_ops_bar = tk.Frame(self.root, bg=t["panel_bg"], height=ui(48), highlightbackground=t["border"], highlightthickness=1)
+        self.selection_label = tk.Label(self.preview_ops_bar, text="0 个已选择", bg=t["panel_bg"], fg=t["accent"], font=("微软雅黑", 10, "bold"))
+        self.selection_label.pack(side=tk.LEFT, padx=ui(16))
+        ttk.Button(self.preview_ops_bar, text="全选", command=self.select_all_in_preview).pack(side=tk.LEFT, padx=ui(4))
+        ttk.Button(self.preview_ops_bar, text="取消全选", command=self.clear_preview_selection).pack(side=tk.LEFT, padx=ui(4))
+        ttk.Button(self.preview_ops_bar, text="批量移动", command=self.move_selected_to_album_dialog, style="Accent.TButton").pack(side=tk.LEFT, padx=ui(4))
+        ttk.Button(self.preview_ops_bar, text="移回未整理", command=self.move_selected_back_to_unsorted).pack(side=tk.LEFT, padx=ui(4))
+        ttk.Button(self.preview_ops_bar, text="关闭预览", command=self.exit_preview_mode).pack(side=tk.RIGHT, padx=ui(16))
 
-        self.bottom_bar = tk.Frame(self.root, bg=t["panel_bg"], height=ALBUM_BAR_HEIGHT)
-        self.bottom_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=14, pady=(6, 6))
+        # 底部相册栏（卡片式）
+        self.bottom_bar = tk.Frame(self.root, bg=t["panel_bg"], height=ALBUM_BAR_HEIGHT, highlightbackground=t["border"], highlightthickness=1)
+        self.bottom_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=ui(18), pady=(ui(6), ui(8)))
 
-        self.add_album_btn = tk.Button(self.bottom_bar, text="+ 新建相册", command=self.create_album_dialog, bg=t["accent"], fg="white", font=("微软雅黑", 10, "bold"), relief=tk.FLAT, activebackground=t["accent"])
-        self.add_album_btn.pack(side=tk.LEFT, padx=(12, 8), pady=16)
+        self.add_album_btn = tk.Button(self.bottom_bar, text="＋ 新建相册", command=self.create_album_dialog, bg=t["accent"], fg="white", font=("微软雅黑", 10, "bold"), relief=tk.FLAT, activebackground=t["accent_hover"], bd=0, padx=ui(12), pady=ui(8), cursor="hand2")
+        self.add_album_btn.pack(side=tk.LEFT, padx=(ui(12), ui(8)))
 
-        self.album_canvas = tk.Canvas(self.bottom_bar, bg=t["panel_bg"], height=ALBUM_BAR_HEIGHT - 18, highlightthickness=0)
+        self.album_canvas = tk.Canvas(self.bottom_bar, bg=t["panel_bg"], height=ALBUM_BAR_HEIGHT - ui(20), highlightthickness=0)
         self.album_hbar = ttk.Scrollbar(self.bottom_bar, orient=tk.HORIZONTAL, command=self.album_canvas.xview)
         self.album_canvas.configure(xscrollcommand=self.album_hbar.set)
         self.album_hbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.album_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10), pady=(8, 0))
+        self.album_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, ui(10)), pady=(ui(8), 0))
         self.album_canvas.bind("<MouseWheel>", self.on_album_mousewheel)
         self.album_canvas.bind("<Button-4>", self.on_album_mousewheel)
         self.album_canvas.bind("<Button-5>", self.on_album_mousewheel)
@@ -531,8 +784,9 @@ class MediaSorterApp:
         self.album_canvas.create_window((0, 0), window=self.album_frame, anchor="nw")
         self.album_frame.bind("<Configure>", lambda e: self.album_canvas.configure(scrollregion=self.album_canvas.bbox("all")))
 
-        self.status_bar = tk.Label(self.root, text="PicaPhoto 已就绪，请先选择目录", bg=t["status_bg"], fg=t["accent"], anchor="w", padx=14, pady=8, font=("微软雅黑", 10))
-        self.status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=14, pady=(0, 8))
+        # 状态栏（最底部，相册栏之下）
+        self.status_bar = tk.Label(self.root, text="PicaPhoto 已就绪，请先选择目录", bg=t["status_bg"], fg=t["subtext"], anchor="w", padx=ui(18), pady=ui(6), font=("微软雅黑", 9))
+        self.status_bar.pack(fill=tk.X, side=tk.BOTTOM, before=self.bottom_bar)
 
     def bind_hotkeys(self):
         for i in range(1, 10):
@@ -825,18 +1079,23 @@ class MediaSorterApp:
         token = self.current_single_token
         self.single_canvas.delete("all")
         if not self.current_files:
+            if not self.root_dir:
+                empty_text = "请先选择目录，开始整理照片与视频"
+            else:
+                empty_text = "当前目录没有可整理的媒体文件"
             self.single_canvas.create_text(
-                max(200, self.single_canvas.winfo_width() // 2),
-                max(120, self.single_canvas.winfo_height() // 2),
-                text="当前目录没有可整理的媒体文件",
+                max(ui(200), self.single_canvas.winfo_width() // 2),
+                max(ui(120), self.single_canvas.winfo_height() // 2),
+                text=empty_text,
                 fill=self.theme["text"],
                 font=("微软雅黑", 16, "bold"),
             )
             self.mode_label.configure(text="单图模式")
-            self.status("当前目录没有可整理的媒体文件")
+            self.status(empty_text)
             return
 
         self.current_idx = max(0, min(self.current_idx, len(self.current_files) - 1))
+        self.status(f"共 {len(self.current_files)} 个媒体文件 · 第 {self.current_idx + 1}/{len(self.current_files)} 个")
         filename = self.current_files[self.current_idx]
         path = os.path.join(self.current_dir, filename)
         is_video = path.lower().endswith(self.get_video_ext())
@@ -940,14 +1199,14 @@ class MediaSorterApp:
         img = Image.new("RGB", THUMB_SIZE, self.theme["card_bg"])
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("msyh.ttc", 20)
+            font = ImageFont.truetype("msyh.ttc", ui(20))
         except Exception:
             font = ImageFont.load_default()
-        draw.rounded_rectangle((10, 10, THUMB_SIZE[0] - 10, THUMB_SIZE[1] - 10), radius=18, outline=self.theme["border"], width=2, fill=self.theme["panel_bg"])
-        draw.polygon([(60, 50), (60, 110), (112, 80)], fill=self.theme["accent"])
-        draw.text((THUMB_SIZE[0] // 2, THUMB_SIZE[1] - 22), "VIDEO", fill=self.theme["text"], anchor="mm", font=font)
-        self.video_placeholder_pil = img
-        self.video_placeholder_photo = ImageTk.PhotoImage(img)
+        draw.rounded_rectangle((ui(10), ui(10), THUMB_SIZE[0] - ui(10), THUMB_SIZE[1] - ui(10)), radius=ui(18), outline=self.theme["border"], width=2, fill=self.theme["panel_bg"])
+        draw.polygon([(ui(60), ui(50)), (ui(60), ui(110)), (ui(112), ui(80))], fill=self.theme["accent"])
+        draw.text((THUMB_SIZE[0] // 2, THUMB_SIZE[1] - ui(22)), "VIDEO", fill=self.theme["text"], anchor="mm", font=font)
+        self.video_placeholder_pil = self._rounded_pil(img, ui(10))
+        self.video_placeholder_photo = ImageTk.PhotoImage(self.video_placeholder_pil)
 
     def get_video_preview_pil(self, path: str, max_size=None):
         if cv2 is None:
@@ -1265,18 +1524,24 @@ class MediaSorterApp:
         self.preview_thumb_source_pil = {}
 
         if not self.current_files:
+            if not self.root_dir:
+                empty_text = "请先选择目录，开始整理照片与视频"
+            else:
+                empty_text = "当前目录没有可预览的媒体文件"
             self.preview_canvas.create_text(
-                max(220, self.preview_canvas.winfo_width() // 2),
-                max(120, self.preview_canvas.winfo_height() // 2),
-                text="当前目录没有可预览的媒体文件",
+                max(ui(220), self.preview_canvas.winfo_width() // 2),
+                max(ui(120), self.preview_canvas.winfo_height() // 2),
+                text=empty_text,
                 fill=self.theme["text"],
                 font=("微软雅黑", 16, "bold"),
             )
+            self.status(empty_text)
             return
+        self.status(f"预览模式 · 共 {len(self.current_files)} 个媒体文件")
 
         canvas_width = max(800, self.preview_canvas.winfo_width())
         cell_w = THUMB_SIZE[0] + PREVIEW_GAP * 2
-        cell_h = THUMB_SIZE[1] + 74
+        cell_h = THUMB_SIZE[1] + ui(74)
         cols = max(1, canvas_width // cell_w)
 
         for idx, filename in enumerate(self.current_files):
@@ -1319,15 +1584,22 @@ class MediaSorterApp:
         self.loading_previews.add(cache_key)
 
         def job():
-            if path.lower().endswith(self.get_video_ext()):
-                return self.get_video_preview_pil(path, THUMB_SIZE)
-            img = Image.open(path)
-            img = ImageOps.exif_transpose(img)
-            img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
-            return img
+            try:
+                if path.lower().endswith(self.get_video_ext()):
+                    img = self.get_video_preview_pil(path, THUMB_SIZE)
+                else:
+                    img = Image.open(path)
+                    img = ImageOps.exif_transpose(img)
+                    img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
+                return self._rounded_pil(img, ui(10))
+            except Exception:
+                return None
 
         def done(pil_img):
             self.loading_previews.discard(cache_key)
+            if pil_img is None:
+                self.render_thumb_failed(token, idx, filename)
+                return
             self.thumb_pil_cache[cache_key] = pil_img.copy()
             self.render_thumb(token, idx, filename, x, y, pil_img)
 
@@ -1356,6 +1628,32 @@ class MediaSorterApp:
                 self.preview_canvas.create_rectangle(bx1, by1, bx2, by2, fill="#000000", outline="", stipple="gray50", tags=(f"item_{idx}",))
                 self.preview_canvas.create_text((bx1+bx2)/2, (by1+by2)/2, text=duration_text, fill="white", font=("微软雅黑", 8, "bold"), tags=(f"item_{idx}",))
 
+    def _rounded_pil(self, img: Image.Image, radius: int) -> Image.Image:
+        """给 PIL 图像加圆角（四角透明），用于缩略图/占位图。"""
+        try:
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            mask = Image.new("L", img.size, 0)
+            d = ImageDraw.Draw(mask)
+            d.rounded_rectangle((0, 0, img.width - 1, img.height - 1), radius=max(1, radius), fill=255)
+            img.putalpha(mask)
+        except Exception:
+            pass
+        return img
+
+    def render_thumb_failed(self, token: int, idx: int, filename: str):
+        """缩略图读取失败时，在该格显示占位提示而不是一直停留“加载中…”。"""
+        if token != self.current_preview_token or idx >= len(self.current_files):
+            return
+        if self.current_files[idx] != filename:
+            return
+        self.preview_canvas.delete(f"loading_{idx}")
+        x, y = self.preview_index_map.get(idx, (0, 0))
+        self.preview_canvas.create_text(
+            x + THUMB_SIZE[0] // 2, y + THUMB_SIZE[1] // 2,
+            text="无法读取", fill=self.theme["subtext"], anchor="center",
+            font=("微软雅黑", 9), tags=(f"item_{idx}",))
+
     def update_selection_label(self):
         self.selection_label.configure(text=f"{len(self.selected_files)} 个已选择")
 
@@ -1383,32 +1681,35 @@ class MediaSorterApp:
         self.album_card_map = {}
         for idx, album in enumerate(self.albums):
             frame = tk.Frame(self.album_frame, bg=self.theme["panel_bg"], bd=0, highlightthickness=0)
-            frame.pack(side=tk.LEFT, padx=6, pady=6)
+            frame.pack(side=tk.LEFT, padx=ui(8), pady=ui(8))
+
+            card = tk.Frame(frame, bg=self.theme["card_bg"], highlightbackground=self.theme["border"], highlightthickness=1, bd=0)
+            card.pack()
 
             btn = tk.Label(
-                frame,
+                card,
                 text=album,
-                width=14,
-                height=2,
                 relief=tk.FLAT,
                 bg=self.theme["card_bg"],
                 fg=self.theme["text"],
-                font=("微软雅黑", 10),
+                font=("微软雅黑", 10, "bold"),
+                padx=ui(14),
+                pady=ui(8),
                 cursor="hand2",
             )
-            btn.pack()
+            btn.pack(fill=tk.X)
 
             count = self.get_file_count(os.path.join(self.root_dir, album), "all") if self.root_dir else 0
             hotkey = f"快捷键 {idx + 1}" if idx < 9 else ""
             info = f"{count} 项"
             if hotkey:
-                info += f"  •  {hotkey}"
+                info += f"  ·  {hotkey}"
             info_label = tk.Label(frame, text=info, bg=self.theme["panel_bg"], fg=self.theme["subtext"], font=("微软雅黑", 9))
-            info_label.pack(pady=(4, 0))
+            info_label.pack(pady=(ui(4), 0))
 
-            for widget in (frame, btn, info_label):
-                widget.bind("<Enter>", lambda e, b=btn: b.configure(bg=self.theme["hover_bg"]))
-                widget.bind("<Leave>", lambda e, b=btn: b.configure(bg=self.theme["card_bg"]))
+            for widget in (frame, card, btn, info_label):
+                widget.bind("<Enter>", lambda e, b=btn, c=card: (b.configure(bg=self.theme["hover_bg"]), c.configure(bg=self.theme["hover_bg"], highlightbackground=self.theme["hover_bg"])))
+                widget.bind("<Leave>", lambda e, b=btn, c=card: (b.configure(bg=self.theme["card_bg"]), c.configure(bg=self.theme["card_bg"], highlightbackground=self.theme["border"])))
                 widget.bind("<ButtonPress-1>", lambda e, a=album, c=frame: self.start_album_drag(e, a, c))
                 widget.bind("<B1-Motion>", self.on_album_drag_motion)
                 widget.bind("<ButtonRelease-1>", self.end_album_drag)
@@ -1570,22 +1871,24 @@ class MediaSorterApp:
         menu.post(event.x_root, event.y_root)
 
     def create_album_dialog(self):
+        t = self.theme
         dialog = Toplevel(self.root)
         dialog.title("新建相册")
-        dialog.geometry("360x160")
+        dialog.geometry(f"{ui(380)}x{ui(210)}")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg=self.theme["panel_bg"])
+        dialog.configure(bg=t["panel_bg"])
         self.apply_window_icon(dialog)
 
-        tk.Label(dialog, text="请输入相册名称", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 12, "bold")).pack(pady=(18, 10))
-        entry = ttk.Entry(dialog, width=28, font=("微软雅黑", 11))
-        entry.pack(pady=4)
+        tk.Label(dialog, text="新建相册", bg=t["panel_bg"], fg=t["text"], font=("微软雅黑", 13, "bold")).pack(pady=(ui(18), ui(4)))
+        tk.Label(dialog, text="请输入相册名称", bg=t["panel_bg"], fg=t["subtext"], font=("微软雅黑", 9)).pack(pady=(0, ui(10)))
+        entry = ttk.Entry(dialog, width=30, font=("微软雅黑", 11))
+        entry.pack(pady=ui(4), ipady=ui(4))
         entry.focus_set()
 
-        btn_bar = tk.Frame(dialog, bg=self.theme["panel_bg"])
-        btn_bar.pack(pady=14)
+        btn_bar = tk.Frame(dialog, bg=t["panel_bg"])
+        btn_bar.pack(pady=ui(14))
 
         def confirm():
             name = entry.get().strip()
@@ -1605,11 +1908,11 @@ class MediaSorterApp:
         def cancel():
             dialog.destroy()
 
-        ttk.Button(btn_bar, text="确认", command=confirm).pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_bar, text="取消", command=cancel).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_bar, text="取消", command=cancel, width=6).pack(side=tk.LEFT, padx=ui(8))
+        ttk.Button(btn_bar, text="确认", command=confirm, style="Accent.TButton", width=6).pack(side=tk.LEFT, padx=ui(8))
         dialog.bind("<Return>", lambda e: confirm())
         dialog.bind("<Escape>", lambda e: cancel())
-        self.center_window(dialog, 360, 160, self.root)
+        self.center_window(dialog, ui(380), ui(210), self.root)
 
     def delete_album_entry(self, album_name: str):
         if album_name not in self.albums:
@@ -1728,7 +2031,7 @@ class MediaSorterApp:
         title = f"第 {self.current_idx + 1}/{len(self.current_files)} 个 | {filename}{extra}"
         self.single_canvas.create_text(
             self.single_canvas.winfo_width() // 2,
-            32,
+            ui(32),
             text=title,
             fill=self.theme["text"],
             font=("微软雅黑", 11, "bold"),
@@ -2209,20 +2512,16 @@ class MediaSorterApp:
 
     # -------------------------- 设置 --------------------------
     def open_settings_dialog(self):
+        t = self.theme
         dialog = Toplevel(self.root)
         dialog.title("PicaPhoto 设置")
-        dialog.geometry("560x700")
-        dialog.minsize(560, 700)
+        dialog.geometry(f"{ui(780)}x{ui(700)}")
+        dialog.minsize(ui(780), ui(700))
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg=self.theme["panel_bg"])
+        dialog.configure(bg=t["root_bg"])
         self.apply_window_icon(dialog)
-
-        content = tk.Frame(dialog, bg=self.theme["panel_bg"])
-        content.pack(fill=tk.BOTH, expand=True, padx=18, pady=(16, 10))
-
-        tk.Label(content, text="PicaPhoto 设置", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
 
         auto_var = tk.BooleanVar(value=self.auto_refresh_enabled)
         theme_var = tk.StringVar(value=self.theme_name)
@@ -2231,45 +2530,99 @@ class MediaSorterApp:
         conflict_var = tk.StringVar(value=self.config.get("conflict_strategy", "rename"))
         preload_var = tk.IntVar(value=int(self.config.get("preload_count", 6)))
         saved = {"done": False}
+        CONFLICT_ITEMS = [("自动重命名", "rename"), ("跳过同名", "skip"), ("覆盖已有文件", "replace")]
 
-        section1 = tk.Frame(content, bg=self.theme["panel_bg"])
-        section1.pack(fill=tk.X, pady=6)
-        tk.Checkbutton(section1, text="自动刷新当前目录", variable=auto_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"], font=("微软雅黑", 11)).pack(anchor="w")
+        # ── 顶部标题栏 ──
+        top = tk.Frame(dialog, bg=t["root_bg"], padx=ui(20), pady=ui(12))
+        top.pack(fill=tk.X)
+        tk.Label(top, image=getattr(self, "brand_logo_image", None), bg=t["root_bg"]).pack(side=tk.LEFT, padx=(0, ui(10)))
+        tk.Label(top, text="PicaPhoto 设置", bg=t["root_bg"], fg=t["text"], font=("微软雅黑", 14, "bold")).pack(side=tk.LEFT)
+        tk.Label(top, text="关闭窗口自动保存", bg=t["root_bg"], fg=t["subtext"], font=("微软雅黑", 9)).pack(side=tk.RIGHT)
 
-        section2 = tk.Frame(content, bg=self.theme["panel_bg"])
-        section2.pack(fill=tk.X, pady=8)
-        tk.Label(section2, text="主题", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w")
-        tk.Radiobutton(section2, text="暗色", value="dark", variable=theme_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"]).pack(anchor="w")
-        tk.Radiobutton(section2, text="浅色", value="light", variable=theme_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"]).pack(anchor="w")
+        # ── 可滚动内容区（微信设置式：整页分组、无侧栏） ──
+        body = tk.Frame(dialog, bg=t["root_bg"])
+        body.pack(fill=tk.BOTH, expand=True, padx=ui(16), pady=(0, ui(14)))
 
-        section3 = tk.Frame(content, bg=self.theme["panel_bg"])
-        section3.pack(fill=tk.X, pady=8)
-        tk.Label(section3, text="图片后缀（逗号分隔）", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w")
-        ttk.Entry(section3, textvariable=img_var, width=60).pack(fill=tk.X, pady=4)
-        tk.Label(section3, text="视频后缀（逗号分隔）", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w", pady=(8, 0))
-        ttk.Entry(section3, textvariable=vid_var, width=60).pack(fill=tk.X, pady=4)
+        canvas = tk.Canvas(body, bg=t["main_bg"], highlightthickness=0, bd=0)
+        vbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        inner = tk.Frame(canvas, bg=t["main_bg"])
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
 
-        section4 = tk.Frame(content, bg=self.theme["panel_bg"])
-        section4.pack(fill=tk.X, pady=8)
-        tk.Label(section4, text="重名文件处理策略", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w")
-        tk.Radiobutton(section4, text="自动重命名", value="rename", variable=conflict_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"]).pack(anchor="w")
-        tk.Radiobutton(section4, text="跳过同名", value="skip", variable=conflict_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"]).pack(anchor="w")
-        tk.Radiobutton(section4, text="覆盖已有文件", value="replace", variable=conflict_var, bg=self.theme["panel_bg"], fg=self.theme["text"], selectcolor=self.theme["panel_bg"], activebackground=self.theme["panel_bg"], activeforeground=self.theme["text"]).pack(anchor="w")
+        def _update_scrollbar():
+            try:
+                bb = canvas.bbox("all")
+                if bb and (bb[3] - bb[1]) > canvas.winfo_height() + 2:
+                    vbar.pack(side=tk.RIGHT, fill=tk.Y)
+                else:
+                    vbar.pack_forget()
+            except Exception:
+                pass
 
-        section5 = tk.Frame(content, bg=self.theme["panel_bg"])
-        section5.pack(fill=tk.X, pady=8)
-        tk.Label(section5, text="预加载数量（单图模式向后预读）", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w")
-        tk.Spinbox(section5, from_=1, to=20, textvariable=preload_var, width=8, font=("微软雅黑", 10), bg=self.theme["main_bg"], fg=self.theme["text"], insertbackground=self.theme["text"], buttonbackground=self.theme["card_bg"], relief=tk.FLAT).pack(anchor="w", pady=(4, 8))
-        tk.Label(section5, text="缓存操作", bg=self.theme["panel_bg"], fg=self.theme["text"], font=("微软雅黑", 11, "bold")).pack(anchor="w")
-        cache_btn_bar = tk.Frame(section5, bg=self.theme["panel_bg"])
-        cache_btn_bar.pack(anchor="w", pady=(4, 0))
-        tk.Button(cache_btn_bar, text="缓存清理/重建", command=lambda: (self.clear_runtime_caches(refresh_view=True), self.status("缓存已清理并重建")), bg=self.theme["card_bg"], fg=self.theme["text"], relief=tk.FLAT, activebackground=self.theme["hover_bg"]).pack(side=tk.LEFT)
+        def _on_inner_configure(_e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            _update_scrollbar()
 
-        tk.Label(content, text="关闭窗口将自动保存设置", bg=self.theme["panel_bg"], fg=self.theme["subtext"], font=("微软雅黑", 9)).pack(anchor="w", pady=(10, 0))
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * int(e.delta / 120), "units"))
+        dialog.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * int(e.delta / 120), "units"), add="+")
 
-        bottom = tk.Frame(dialog, bg=self.theme["panel_bg"])
-        bottom.pack(fill=tk.X, padx=18, pady=(6, 18))
-        tk.Button(bottom, text="关闭", command=lambda: save_and_close(close_only=True), bg=self.theme["card_bg"], fg=self.theme["text"], relief=tk.FLAT, font=("微软雅黑", 10), activebackground=self.theme["hover_bg"]).pack(fill=tk.X)
+        def group_title(text):
+            tk.Label(inner, text=text, bg=t["main_bg"], fg=t["subtext"], font=("微软雅黑", 9, "bold")).pack(anchor="w", padx=ui(24), pady=(ui(18), ui(4)))
+
+        def add_row(title, desc="", control_factory=None, divider=True):
+            """一行设置：左标题+说明，右控件（右对齐、垂直居中）。"""
+            row = tk.Frame(inner, bg=t["main_bg"])
+            row.pack(fill=tk.X, padx=ui(24), pady=(ui(10), ui(8)))
+            row.columnconfigure(0, weight=1)
+            left = tk.Frame(row, bg=t["main_bg"])
+            left.grid(row=0, column=0, sticky="w")
+            tk.Label(left, text=title, bg=t["main_bg"], fg=t["text"], font=("微软雅黑", 10)).pack(anchor="w")
+            if desc:
+                tk.Label(left, text=desc, bg=t["main_bg"], fg=t["subtext"], font=("微软雅黑", 9)).pack(anchor="w", pady=(ui(2), 0))
+            if control_factory is not None:
+                cw = tk.Frame(row, bg=t["main_bg"])
+                cw.grid(row=0, column=1, sticky="e", padx=(ui(16), 0))
+                ctrl = control_factory(cw)
+                ctrl.pack(side=tk.RIGHT)
+            if divider:
+                tk.Frame(inner, bg=t["divider"], height=1).pack(fill=tk.X, padx=ui(24), pady=(ui(8), 0))
+
+        # ── 基础 ──
+        group_title("基础")
+        add_row("自动刷新当前目录", "目录内容变化时自动重新扫描",
+                lambda p: _Switch(p, auto_var, off_color=t["hover_bg"]))
+        add_row("外观主题", "界面配色方案",
+                lambda p: _theme_control(p, t, theme_var))
+
+        # ── 文件类型 ──
+        group_title("文件类型")
+        add_row("图片后缀", "支持的图片格式，逗号分隔",
+                lambda p: ttk.Entry(p, textvariable=img_var, width=30, justify="left"))
+        add_row("视频后缀", "支持的视频格式，逗号分隔",
+                lambda p: ttk.Entry(p, textvariable=vid_var, width=30, justify="left"))
+
+        # ── 移动策略 ──
+        group_title("移动策略")
+        combo_holder = {}
+        add_row("重名文件处理策略", "移动到相册时遇到同名文件的处理方式",
+                lambda p: _conflict_combo(p, t, CONFLICT_ITEMS, conflict_var, combo_holder))
+
+        # ── 性能与缓存 ──
+        group_title("性能与缓存")
+        add_row("向后预读数量", "单图模式下提前加载的相邻文件数",
+                lambda p: ttk.Spinbox(p, from_=1, to=20, textvariable=preload_var, width=6, style="TSpinbox", justify="center"))
+        add_row("缓存", "缩略图与视频帧缓存",
+                lambda p: tk.Button(p, text="清理并重建", command=lambda: (self.clear_runtime_caches(refresh_view=True), self.status("缓存已清理并重建")), bg=t["card_bg"], fg=t["text"], relief=tk.FLAT, font=("微软雅黑", 9), padx=ui(12), pady=ui(5), activebackground=t["hover_bg"], cursor="hand2", highlightthickness=0))
+
+        # ── 关于 ──
+        group_title("关于")
+        add_row("版本", "PicaPhoto v1.0 · 图片整理工具")
+        add_row("快捷键", "Tab 预览 ｜ ← → 切换 ｜ Ctrl+Z 撤销 ｜ R 旋转 ｜ F 翻转", divider=False)
+        tk.Frame(inner, bg=t["main_bg"], height=ui(16)).pack()
 
         def save_and_close(close_only=False):
             if saved["done"]:
@@ -2288,6 +2641,12 @@ class MediaSorterApp:
                 return
             self.config["image_ext"] = image_ext
             self.config["video_ext"] = video_ext
+            combo = combo_holder.get("combo")
+            if combo is not None:
+                for label, v in CONFLICT_ITEMS:
+                    if combo.get() == label:
+                        conflict_var.set(v)
+                        break
             self.config["conflict_strategy"] = conflict_var.get()
             self.config["preload_count"] = max(1, min(20, int(preload_var.get() or 6)))
             self.auto_refresh_enabled = auto_var.get()
@@ -2309,10 +2668,8 @@ class MediaSorterApp:
 
         dialog.protocol("WM_DELETE_WINDOW", save_and_close)
         dialog.bind("<Escape>", lambda e: save_and_close())
-        self.center_window(dialog, 560, 700, self.root)
+        self.center_window(dialog, ui(780), ui(700), self.root)
 
-    # -------------------------- 自动刷新 --------------------------
-# -------------------------- 自动刷新 --------------------------
     def start_auto_refresh(self):
         self.stop_auto_refresh()
         self.stop_hover_video_preview(restore=False)
@@ -2386,8 +2743,24 @@ class MediaSorterApp:
         if not hasattr(self, "recent_ops_list"):
             return
         self.recent_ops_list.delete(0, tk.END)
-        for item in reversed(self.recent_ops[-30:]):
-            self.recent_ops_list.insert(tk.END, item)
+        if not self.recent_ops:
+            self.recent_ops_list.insert(tk.END, "暂无操作记录")
+            try:
+                self.recent_ops_list.itemconfig(0, fg=self.theme["subtext"])
+            except Exception:
+                pass
+        else:
+            for item in reversed(self.recent_ops[-30:]):
+                self.recent_ops_list.insert(tk.END, item)
+        sb = getattr(self, "recent_scroll", None)
+        if sb is not None:
+            try:
+                if self.recent_ops:
+                    sb.pack(side=tk.RIGHT, fill=tk.Y)
+                else:
+                    sb.pack_forget()
+            except Exception:
+                pass
 
     def format_duration(self, seconds):
         try:
