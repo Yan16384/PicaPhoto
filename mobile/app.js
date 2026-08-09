@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.0";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.1";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -54,6 +54,8 @@ let statsDirty = 0, statsTimer = null;
 let storageCache = { t:0, bytes:0 };
 let gridCols = (parseInt(localStorage.getItem("pp_grid_cols")||"3",10)||3);
 gridCols = Math.max(2, Math.min(6, gridCols));
+let vworkPos = localStorage.getItem("pp_vwork")||"bottom";   // bottom | left | right
+function applyVWork(){ const v=$("#viewer"); if(v) v.dataset.vwork=vworkPos; }
 
 /* ============ 工具 ============ */
 const $ = s => document.querySelector(s);
@@ -811,6 +813,7 @@ let vSlots=[]; const VWIN=2;
 function openViewer(list, idx, mode){
   viewerList=list; viewerIdx=idx; viewerMode=mode||"normal"; zoomed=false; lastTap=0;
   $("#viewer").classList.add("open");
+  applyVWork();
   buildSlides();
   setTrack(0,0,1,false);
   updateViewerChrome();
@@ -1024,7 +1027,7 @@ async function moveCurrentTo(name){
 }
 
 /* ---- 手势：左右切换 / 上滑回收 / 下滑返回 / 点按 / 长按 Peek / 捏合退出 ---- */
-$("#viewer").addEventListener("touchstart", e=>{
+$("#vPreview").addEventListener("touchstart", e=>{
   if(e.touches.length>1){
     pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
     g=null; clearTimeout(longT);
@@ -1044,7 +1047,7 @@ $("#viewer").addEventListener("touchstart", e=>{
   },360);
 },{passive:true});
 
-$("#viewer").addEventListener("touchmove", e=>{
+$("#vPreview").addEventListener("touchmove", e=>{
   if(e.touches.length>1){
     const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
     if(pinch>0 && Math.abs(d-pinch)>50){ pinch=0; closeViewer(); return; }
@@ -1077,7 +1080,7 @@ $("#viewer").addEventListener("touchmove", e=>{
   }
 },{passive:false});
 
-$("#viewer").addEventListener("touchend", e=>{
+$("#vPreview").addEventListener("touchend", e=>{
   clearTimeout(longT);
   if(!g) return;
   const g0=g; g=null;
@@ -1098,8 +1101,8 @@ $("#viewer").addEventListener("touchend", e=>{
     return;
   }
   if(g0.mode==="v"){
-    if(g0.dy<-70){ setTrack(0,-120,.9,true); setTimeout(()=>doTrashCurrent(),200); }
-    else if(g0.dy>70){ setTrack(0,120,1,true); setTimeout(()=>closeViewer(),200); }
+    if(g0.dy<-70){ doTrashCurrent(); }        /* 立即删除：当前照片飞走 + 下一张马上出现，可连续上滑 */
+    else if(g0.dy>70){ closeViewer(); }
     else { setTrack(0,0,1,true); }
     return;
   }
@@ -1116,7 +1119,7 @@ $("#viewer").addEventListener("touchend", e=>{
   }
 },{passive:true});
 
-$("#viewer").addEventListener("touchcancel", ()=>{
+$("#vPreview").addEventListener("touchcancel", ()=>{
   clearTimeout(longT); g=null;
   const cur=vSlots.find(s=>s.idx===viewerIdx); if(cur) cur.el.classList.remove("peek");
   $("#vHint").classList.remove("show"); $("#vTrashZone").classList.remove("show");
@@ -1127,9 +1130,19 @@ async function doTrashCurrent(){
   const m=viewerList[viewerIdx];
   if(!m) return;
   const cur=vSlots.find(s=>s.idx===viewerIdx);
-  if(cur){ cur.el.classList.add("flyout-up"); await new Promise(r=>setTimeout(r,140)); }
+  /* 当前照片克隆到飞走层：一张飞走的同时，下一张立即在原位显示，可连续上滑 */
+  if(cur){
+    const img=cur.el.querySelector("img.full.show")||cur.el.querySelector("img.full")||cur.el.querySelector("img.thumb");
+    if(img && img.src){
+      const ghost=document.createElement("img");
+      ghost.src=img.src; ghost.alt=""; ghost.className="ghost-fly";
+      document.body.appendChild(ghost);
+      requestAnimationFrame(()=>requestAnimationFrame(()=>ghost.classList.add("fly")));
+      setTimeout(()=>{ if(ghost.parentNode) ghost.parentNode.removeChild(ghost); },260);
+    }
+  }
   const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
-  afterViewerRemove();   // 先重建视图，避免等待异步删除导致黑屏
+  afterViewerRemove();
   if(viewerMode==="trash"){ await permanentDelete(m); } else { await trashOne(m); }
 }
 
@@ -1238,6 +1251,7 @@ function renderMe(){
     <div class="set-group">
       <div class="set-row" id="rowTheme"><div class="tt"><div class="n">外观主题</div><div class="d" id="themeDesc">${themeDesc}</div></div>
         <div class="switch ${darkOn?'on':''}" id="swTheme"></div></div>
+      <div class="set-row" id="rowVWork"><div class="tt"><div class="n">相册位置</div><div class="d">大图整理时相册按钮位置：${vworkPos==="bottom"?"下部·横滑":vworkPos==="left"?"左部·竖滑靠左":"右部·竖滑靠右"}</div></div><span class="arrow">›</span></div>
     </div>
     <div class="set-h2">关于</div>
     <div class="set-group">
@@ -1253,6 +1267,13 @@ function renderMe(){
     sheet([{ic:"🌗",t:"跟随系统",f:()=>{theme="auto";localStorage.setItem("pp_theme","auto");applyTheme();renderMe();}},
       {ic:"☀️",t:"浅色",f:()=>{theme="light";localStorage.setItem("pp_theme","light");applyTheme();renderMe();}},
       {ic:"🌙",t:"深色",f:()=>{theme="dark";localStorage.setItem("pp_theme","dark");applyTheme();renderMe();}}],"外观主题");
+  });
+  $("#rowVWork").addEventListener("click", ()=>{
+    sheet([
+      {ic:"⬇️",t:"下部（左右滑动）",f:()=>{vworkPos="bottom";localStorage.setItem("pp_vwork","bottom");applyVWork();renderMe();}},
+      {ic:"⬅️",t:"左部（上下滑动·照片靠左）",f:()=>{vworkPos="left";localStorage.setItem("pp_vwork","left");applyVWork();renderMe();}},
+      {ic:"➡️",t:"右部（上下滑动·照片靠右）",f:()=>{vworkPos="right";localStorage.setItem("pp_vwork","right");applyVWork();renderMe();}}
+    ],"相册位置");
   });
   $("#swTheme").addEventListener("click", e=>{
     e.stopPropagation();
