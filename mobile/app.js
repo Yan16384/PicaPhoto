@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.2";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.3";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -484,12 +484,22 @@ function monthLabelOf(m){
   if(!d || isNaN(d.getTime())) return null;
   return d.getFullYear()+"年"+(d.getMonth()+1)+"月";
 }
+const VP_PLACEHOLDER = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#262a33"/><circle cx="120" cy="120" r="42" fill="rgba(255,255,255,.14)"/><path d="M104 96v48l40-24z" fill="#fff"/></svg>');
+function imgSrcOf(m){ return isVideo(m) ? (m.thumb||VP_PLACEHOLDER) : (m.thumb||m.uri||objURL(m)); }
 function buildPhotoEl(m, idx){
   const key = itemKey(m);
   const el = document.createElement("div");
   el.className = "ph";
   el.dataset.key = key;
-  el.innerHTML = '<img loading="lazy" decoding="async" src="'+(m.thumb||m.uri||objURL(m))+'" alt=""><span class="idx"></span>'+(isVideo(m)?'<span class="dur">▶</span>':'');
+  el.innerHTML = '<img loading="lazy" decoding="async" src="'+imgSrcOf(m)+'" alt=""><span class="idx"></span>'+(isVideo(m)?'<span class="dur">▶</span>':'');
+  /* 加载失败的占位（系统已删除的照片等）立即移除，不残留损坏占位 */
+  const im=el.querySelector("img");
+  im.onerror=()=>{
+    const mi=visibleMedia().findIndex(x=>itemKey(x)===key);
+    if(mi>=0){ const mm=visibleMedia()[mi]; if(phoneAlbum!==null && phoneMedia.indexOf(mm)>=0) phoneMedia.splice(phoneMedia.indexOf(mm),1); }
+    el.classList.add("flyout-up");
+    setTimeout(()=>{ el.remove(); phEls.delete(key); },160);
+  };
   if(multi && selection.has(key)){ el.classList.add("sel-on"); el.querySelector(".idx").textContent = [...selection].indexOf(key)+1; }
   if(multi) el.classList.add("multi");
   if(idx < 60){ el.classList.add("anim-pop"); el.style.animationDelay = (idx*20)+"ms"; }
@@ -942,12 +952,10 @@ function updateViewerChrome(){
       const i=viewerList.indexOf(mm); if(i>=0) viewerList.splice(i,1); afterViewerRemove();
     });
   } else {
-    const f=isFav(m);
     let chips='<div class="vchip new" id="vNew">＋ 新建</div>';
     albumTargets().forEach(a=>{ chips+='<div class="vchip" data-alb="'+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</div>'; });
     work.innerHTML='<div class="vw-albums">'+chips+'</div>'+
       '<div class="vw-btns">'+
-      '<button class="'+(f?'on':'')+'" id="vFav">'+(f?'♥':'♡')+' 收藏</button>'+
       '<button id="vUndo" style="'+(lastTrashed?'':'display:none')+'">↩ 撤销</button>'+
       '<button id="vTrash">🗑 回收</button>'+
       '<button id="vClose2">✕ 关闭</button>'+
@@ -974,7 +982,6 @@ function updateViewerChrome(){
         });
       }
     }catch(e){}
-    $("#vFav").addEventListener("click", ()=>{ toggleFav(viewerList[viewerIdx]); });
     $("#vUndo").addEventListener("click", ()=>{ undoTrash(); });
     $("#vTrash").addEventListener("click", ()=>{ doTrashCurrent(); });
     $("#vClose2").addEventListener("click", closeViewer);
@@ -1045,6 +1052,9 @@ async function moveCurrentTo(name){
           clearPhoneMediaCache();
           toast("已移入「"+name+"」");
           updateFabDone();
+          /* 移入成功自动进入下一张，方便连续整理 */
+          viewerIdx = Math.min(viewerIdx+1, Math.max(0, viewerList.length-1));
+          afterViewerRemove();
         } else {
           /* 恢复 */
           if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
@@ -1270,7 +1280,6 @@ function renderMe(){
       <div class="stat"><b>${todayN}</b><span>今日整理</span></div>
       <div class="stat"><b>${stats.trashTotal}</b><span>累计回收</span></div>
       <div class="stat"><b>${stats.restoreTotal}</b><span>累计恢复</span></div>
-      <div class="stat"><b>${favs.size}</b><span>收藏</span></div>
       <div class="stat"><b>${trashList.length}</b><span>回收站</span></div>
     </div>
     <div class="set-h2" id="calMonthTotal">本月整理 0 张</div>
@@ -1365,7 +1374,7 @@ let phLongKey=null, phLongT=null, phLongSuppress=false;
 function showPhPreview(m){
   const p=$("#phPreview");
   if(!p) return;
-  p.innerHTML='<img src="'+(m.uri||objURL(m))+'" alt="">';
+  p.innerHTML='<img src="'+imgSrcOf(m)+'" alt="">';
   p.classList.add("show");
 }
 function hidePhPreview(){ const p=$("#phPreview"); if(p) p.classList.remove("show"); }
