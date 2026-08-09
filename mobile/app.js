@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.4";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.5";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -167,7 +167,7 @@ function fmtBytes(n){
 /* ============ 手机相册（原生桥接） ============ */
 let phoneMediaCache = new Map();
 const PHONE_CACHE_TTL = 30*24*3600*1000;   // 内存缓存 30 天（只要照片不删就一直有效）
-const PHONE_CACHE_MAX = 20;          // 最多缓存 20 个相册，防内存膨胀
+const PHONE_CACHE_MAX = 120;         // 内存缓存上限（避免相册多被淘汰导致反复加载）
 function adjustAlbumCounts(){
   /* 相册计数 = 系统原始数 - 已在回收站（App 内软删除）的照片数；基于 rawCount 不重复减 */
   try{
@@ -236,6 +236,7 @@ function readPhoneMedia(id, cb){
     BRIDGE.readMediaAsync(id, "__mediaCb");
   };
   /* 内存未命中 → 读 IndexedDB 持久缓存（退出软件后重入 0 加载） */
+  if(!db){ refresh(false); return; }
   try{
     const t=db.transaction("phonecache").objectStore("phonecache").get(id);
     t.onsuccess=()=>{
@@ -270,11 +271,15 @@ function openPhoneAlbum(id, name){
   exitMulti();
   phoneMedia = [];
   showOrg();
-  /* 有缓存立即显示（秒开），无缓存才显示加载中 */
+  /* 有缓存立即显示（秒开）；无缓存显示骨架屏（马上有画面，数据到后填充） */
   const c=phoneMediaCache.get(id);
   const fresh = c && Date.now()-c.t<PHONE_CACHE_TTL;
   if(!fresh){
-    $("#photos").innerHTML = '<div class="empty"><div class="big">⏳</div>正在加载相册…</div>';
+    let sk="";
+    for(let i=0;i<24;i++) sk+='<div class="ph skel"></div>';
+    $("#photos").className="ph-grid";
+    $("#photos").innerHTML = sk;
+    applyGridCols();
   }
   readPhoneMedia(id, items=>{
     phoneMedia = items;
@@ -517,6 +522,43 @@ function monthLabelOf(m){
 }
 const VP_PLACEHOLDER = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#262a33"/><circle cx="120" cy="120" r="42" fill="rgba(255,255,255,.14)"/><path d="M104 96v48l40-24z" fill="#fff"/></svg>');
 function imgSrcOf(m){ return isVideo(m) ? (m.thumb||VP_PLACEHOLDER) : (m.thumb||m.uri||objURL(m)); }
+/* 视频真实缩略图：可见时后台取帧，替换占位并缓存到 m.thumb */
+let vtPending = new Map();
+let vtObserver = null;
+window.__vtCb = obj => {
+  try{
+    const r=JSON.parse(obj);
+    if(r && r.uri){
+      const entry=vtPending.get(r.uri);
+      if(entry){
+        if(r.thumb && r.thumb!=="null"){ entry.m.thumb=r.thumb; entry.img.src=r.thumb; }
+        vtPending.delete(r.uri);
+      }
+    }
+  }catch(e){}
+};
+function ensureVideoThumb(m, el){
+  if(!m || !m.uri || !BRIDGE || !BRIDGE.getVideoThumbAsync) return;
+  if(m.thumb || vtPending.has(m.uri)) return;
+  const img=el ? el.querySelector("img") : null;
+  if(!img) return;
+  vtPending.set(m.uri, {m, img});
+  try{ BRIDGE.getVideoThumbAsync(m.uri, "__vtCb"); }catch(e){ vtPending.delete(m.uri); }
+}
+function setupVtObserver(){
+  if(vtObserver) return;
+  vtObserver = new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      if(en.isIntersecting){
+        const el=en.target; el._vtObserved=false;
+        const key=el.dataset.key;
+        const mm=visibleMedia().find(x=>itemKey(x)===key);
+        if(mm) ensureVideoThumb(mm, el);
+        vtObserver.unobserve(el);
+      }
+    });
+  }, {root:document.getElementById("view-photos")||null, rootMargin:"120px"});
+}
 function buildPhotoEl(m, idx){
   const key = itemKey(m);
   const el = document.createElement("div");
@@ -534,6 +576,11 @@ function buildPhotoEl(m, idx){
   if(multi && selection.has(key)){ el.classList.add("sel-on"); el.querySelector(".idx").textContent = [...selection].indexOf(key)+1; }
   if(multi) el.classList.add("multi");
   if(idx < 60){ el.classList.add("anim-pop"); el.style.animationDelay = (idx*20)+"ms"; }
+  /* 视频且无缩略图：注册懒加载（可见时取真实帧） */
+  if(isVideo(m) && !m.thumb && BRIDGE && BRIDGE.getVideoThumbAsync){
+    setupVtObserver();
+    vtObserver.observe(el);
+  }
   phEls.set(key, el);
   return el;
 }
