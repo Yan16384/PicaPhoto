@@ -355,3 +355,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 /* 首页隐藏相册板块 */
 .hide-alb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;opacity:.75}
 .hide-tag{position:absolute;top:4px;left:4px;font-size:9px;color:#fff;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:8px;z-index:2}
+
+/* 骨架屏占位（首次加载立即有画面） */
+.ph.skel{background:linear-gradient(100deg,color-mix(in srgb,var(--fg) 6%,transparent) 40%,color-mix(in srgb,var(--fg) 12%,transparent) 50%,color-mix(in srgb,var(--fg) 6%,transparent) 60%);background-size:200% 100%;animation:skel 1.1s ease infinite}
+@keyframes skel{0%{background-position:120% 0}100%{background-position:-120% 0}}
