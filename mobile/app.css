@@ -272,7 +272,6 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring)}
 #multiAlbums .mchip:active{transform:scale(.9)}
 #multiAlbums .mchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
-#multiAlbums .mchip.hide{background:color-mix(in srgb,var(--fg) 18%,transparent);color:var(--fg)}
 /* ============ Toast ============ */
 #toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 26px);transform:translateX(-50%) translateY(10px);
   background:rgba(0,0,0,.82);color:#fff;padding:10px 16px;border-radius:22px;font-size:14px;z-index:200;
