@@ -319,8 +319,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #viewer[data-vwork="left"] .vw-albums,#viewer[data-vwork="right"] .vw-albums{flex-direction:column;overflow-y:auto;overflow-x:hidden;padding:2px 0 8px}
 #viewer[data-vwork="left"] .vw-btns,#viewer[data-vwork="right"] .vw-btns{flex-direction:column;gap:6px}
 #viewer[data-vwork="left"] .vchip,#viewer[data-vwork="right"] .vchip{width:100%;justify-content:center;height:42px;border-radius:12px;padding:0 8px;font-size:13px;margin-bottom:6px}
-#viewer[data-vwork="left"] .slide{justify-content:flex-start}
-#viewer[data-vwork="right"] .slide{justify-content:flex-end}
+#viewer[data-vwork="left"] .slide{justify-content:flex-end}
+#viewer[data-vwork="right"] .slide{justify-content:flex-start}
 /* 下部：一行放不下自动两行，两行仍放不下横向滑动 */
 #viewer[data-vwork="bottom"] .vw-albums{flex-wrap:wrap;max-height:76px;overflow-y:hidden;overflow-x:auto}
 /* 上滑删除：当前照片飞走层 */
@@ -333,3 +333,25 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .hide-btn:active{transform:scale(.92)}
 .mini-clear{width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;transition:transform .12s var(--spring)}
 .mini-clear:active{transform:scale(.82)}
+
+/* ============ 隐藏相册多选面板 ============ */
+#hidePanel{position:fixed;inset:0;z-index:125;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}
+#hidePanel.open{display:flex}
+#hidePanel .box{width:min(340px,88%);background:var(--card);border-radius:16px;padding:18px;animation:dlgIn .2s var(--spring);max-height:80vh;display:flex;flex-direction:column}
+#hidePanel .t{font-size:16px;font-weight:700;margin-bottom:12px;text-align:center;flex:none}
+#hidePanel .hide-list{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:120px}
+#hidePanel .hide-row{display:flex;align-items:center;gap:12px;padding:13px 10px;border-radius:12px;font-size:15px;border-bottom:1px solid var(--line);transition:background .15s}
+#hidePanel .hide-row:active{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+#hidePanel .hide-row .ck{font-size:18px;width:26px;text-align:center;flex:none}
+#hidePanel .hide-row .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hidePanel .hide-row.on .nm{color:var(--accent);font-weight:600}
+#hidePanel .btns{display:flex;gap:10px;margin-top:14px;flex:none}
+#hidePanel .btns button{flex:1;height:42px;border-radius:10px;font-size:15px;font-weight:600}
+#hidePanel .ok{background:var(--accent);color:#fff}
+#hidePanel .no{background:var(--bg);color:var(--fg)}
+/* 未整理进度条 */
+.unfiled-progress{margin:0 2px 12px;padding:10px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line);color:var(--fg);font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.unfiled-progress b{color:var(--accent);font-size:16px}
+/* 首页隐藏相册板块 */
+.hide-alb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;opacity:.75}
+.hide-tag{position:absolute;top:4px;left:4px;font-size:9px;color:#fff;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:8px;z-index:2}
