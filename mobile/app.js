@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.9";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.4.0";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -890,8 +890,6 @@ function nativeMove(name, list){
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       const ok=res.filter(r=>r.ok).length, fail=res.length-ok;
       if(ok) recordStats("move", ok);
-      /* 源照片保留（srcKept）的加入待删列表，统一“完成整理” */
-      res.forEach(r=>{ if(r.ok && r.srcKept && r.uri) pendingMoves.add(r.uri); });
       updateFabDone();
       clearPhoneMediaCache();
       if(fail>0){
@@ -941,7 +939,7 @@ async function removeSelected(){
 
 /* ============ 回收站（App 内软删除：系统文件不动，清空回收站时才真正删除） ============ */
 let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册中过滤
-let pendingMoves = new Set();  // 已复制到目标但源照片待系统确认删除的 uri（“完成整理”统一处理）
+let pendingMoves = new Set();  // kept empty: moves are true background moves now
 let hiddenAlbums = new Set(JSON.parse(localStorage.getItem("pp_hidden")||"[]"));
 let unfiledTotal = 0;   // 未整理视图加载总数（已整理 = 总数 - 当前剩余）  // 隐藏相册 id → 照片计入“未整理”
 function saveHidden(){ try{ localStorage.setItem("pp_hidden", JSON.stringify([...hiddenAlbums])); }catch(e){} }
@@ -1270,7 +1268,6 @@ function moveOutCurrent(name){
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       if(res[0]&&res[0].ok){
         recordStats("move",1);
-        if(res[0].srcKept && m.uri) pendingMoves.add(m.uri);
         clearPhoneMediaCache();
         toast("已移出「"+name+"」到 PicaPhoto");
         updateFabDone();
@@ -1315,7 +1312,6 @@ async function moveCurrentTo(name){
         let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
         if(res[0]&&res[0].ok){
           recordStats("move",1);
-          if(res[0].srcKept && m.uri) pendingMoves.add(m.uri);
           clearPhoneMediaCache();
           toast("已移入「"+name+"」");
           updateFabDone();
@@ -1748,21 +1744,8 @@ $("#trashClear").addEventListener("click", e=>{ e.stopPropagation(); emptyTrash(
 $("#selDone").addEventListener("click", exitMulti);
 $("#hideDone").addEventListener("click", ()=>{ saveHidden(); $("#hidePanel").classList.remove("open"); renderHome(); toast(hiddenAlbums.size?("已隐藏 "+hiddenAlbums.size+" 个相册，照片计入未整理"):"未隐藏任何相册"); });
 $("#hideCancel").addEventListener("click", ()=>{ $("#hidePanel").classList.remove("open"); });
-/* “完成整理”：一次性批量确认删除已移动照片的源文件 */
-function updateFabDone(){
-  const n=pendingMoves.size;
-  const b=$("#fabDone");
-  if(!b) return;
-  const show = n>0 && tab==="org" && orgSub==="photos";
-  b.style.display = show ? "flex" : "none";
-  if(show) b.textContent="完成整理 ("+n+")";
-}
-$("#fabDone").addEventListener("click", ()=>{
-  const uris=[...pendingMoves];
-  if(!uris.length) return;
-  requestRealDelete(uris);   // 系统一次性确认，确认后 __deleted 清理
-  toast("需系统确认删除 "+uris.length+" 张移动后的源照片副本（系统允许即可）");
-});
+/* moves take effect automatically in background; only deletion needs system confirm */
+function updateFabDone(){ const b=$("#fabDone"); if(b) b.style.display="none"; }
 $("#selAll").addEventListener("click", selectAll);
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
