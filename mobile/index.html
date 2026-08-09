@@ -1,130 +1,99 @@
-﻿<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#2e58e8">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>PicaPhoto</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<style>
-:root{
-  --bg:#f2f3f5; --card:#fff; --fg:#1f2329; --sub:#8a919f; --line:#e4e6eb;
-  --accent:#2e58e8; --accent-soft:#eef3ff; --green:#07c160; --danger:#e54545;
-  --bar-h:54px; --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
-  --r:14px;
-}
-[data-theme="dark"]{
-  --bg:#17181c; --card:#262931; --fg:#f2f4f8; --sub:#9aa3b2; --line:#333844;
-  --accent:#4d8dff; --accent-soft:#1f2c47; --green:#2fd08a; --danger:#ff6b6b;
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
-  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
-  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-body{overflow:hidden;touch-action:manipulation}
-button{font-family:inherit;border:none;background:none;color:inherit;cursor:pointer}
-#topbar{position:fixed;top:0;left:0;right:0;z-index:50;height:calc(var(--bar-h) + var(--safe-t));
-  padding:var(--safe-t) 14px 0;display:flex;align-items:center;gap:10px;
-  background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(14px);
-  border-bottom:1px solid var(--line)}
-#topbar .logo{width:30px;height:30px;border-radius:8px;flex:none}
-#topbar h1{font-size:17px;font-weight:700;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#topbar .tb-btn{min-width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-  font-size:17px;background:var(--card);border:1px solid var(--line);padding:0 8px}
-main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h) + var(--safe-b));overflow:hidden}
-.view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 30px;
-  display:none}
-.view.active{display:block}
-.set-h{font-size:12px;color:var(--sub);font-weight:600;padding:8px 4px 4px}
-.full{grid-column:1/-1}
-.alb-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.alb{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;transition:transform .12s}
-.alb:active{transform:scale(.97)}
-.alb .cover{width:100%;aspect-ratio:4/3;background:var(--accent-soft);position:relative}
-.alb .cover img{width:100%;height:100%;object-fit:cover;display:block}
-.alb .meta{padding:10px 12px}
-.alb .name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.alb .cnt{font-size:12px;color:var(--sub);margin-top:2px}
-.ph-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
-.ph{aspect-ratio:1;background:var(--card);border-radius:6px;overflow:hidden;position:relative}
-.ph img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.ph .sel{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;
-  background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:13px}
-.ph.multi .sel{display:flex}
-.ph.sel-on{outline:3px solid var(--accent);outline-offset:-3px}
-.ph .dur{position:absolute;right:4px;bottom:4px;font-size:10px;color:#fff;background:rgba(0,0,0,.55);
-  padding:1px 5px;border-radius:6px}
-.empty{padding:56px 24px;text-align:center;color:var(--sub)}
-.empty .big{font-size:54px;margin-bottom:12px}
-#tabbar{position:fixed;left:0;right:0;bottom:0;z-index:50;height:calc(var(--bar-h) + var(--safe-b));
-  padding-bottom:var(--safe-b);display:flex;background:color-mix(in srgb,var(--card) 92%,transparent);
-  backdrop-filter:blur(14px);border-top:1px solid var(--line)}
-.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-  font-size:11px;color:var(--sub)}
-.tab .ic{font-size:21px;line-height:1}
-.tab.on{color:var(--accent);font-weight:600}
-.big-btn{margin:12px auto 0;height:50px;border-radius:14px;background:var(--accent);color:#fff;font-size:16px;font-weight:600;
-  display:flex;align-items:center;justify-content:center;gap:8px;width:min(320px,80%)}
-.big-btn.ghost{background:var(--card);color:var(--fg);border:1px solid var(--line)}
-#viewer{position:fixed;inset:0;background:#000;z-index:100;display:none}
+/* ============ ??????Phoom ??? ============ */
+#viewer{position:fixed;inset:0;background:#000;z-index:100;display:none;touch-action:none;overflow:hidden}
 #viewer.open{display:block}
-#viewer .track{position:absolute;inset:0;display:flex;align-items:stretch}
-#viewer .slide{flex:0 0 100%;position:relative;overflow:hidden}
-#viewer img,#viewer video{width:100%;height:100%;object-fit:contain;pointer-events:none;user-select:none;-webkit-user-drag:none}
-#viewer .v-top{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
-  padding:calc(var(--safe-t) + 8px) 12px;color:#fff;background:linear-gradient(180deg,rgba(0,0,0,.55),transparent);
-  font-size:14px;transition:opacity .25s}
-#viewer .v-top .close{margin-left:auto;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.18);
-  display:flex;align-items:center;justify-content:center;font-size:18px}
-#viewer .v-idx{position:absolute;top:calc(var(--safe-t) + 16px);left:0;right:0;text-align:center;color:#fff;
-  font-size:13px;text-shadow:0 1px 4px rgba(0,0,0,.5);transition:opacity .25s}
-#selbar{position:fixed;left:12px;right:12px;bottom:calc(var(--bar-h) + var(--safe-b) + 10px);z-index:80;
-  background:var(--card);border:1px solid var(--line);border-radius:16px;display:none;align-items:center;
-  gap:8px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
-#selbar.show{display:flex}
-#selbar .count{font-weight:700;flex:1;white-space:nowrap}
-#selbar .sbtn{height:38px;padding:0 12px;border-radius:10px;background:var(--accent-soft);color:var(--accent);
-  font-size:13px;font-weight:600;white-space:nowrap}
-#selbar .sbtn.green{background:var(--green);color:#fff}
-#sheet{position:fixed;left:0;right:0;bottom:0;z-index:120;background:var(--card);border-radius:18px 18px 0 0;
-  transform:translateY(105%);transition:transform .28s cubic-bezier(.2,.8,.2,1);max-height:70vh;display:flex;
-  flex-direction:column;padding-bottom:var(--safe-b)}
-#sheet.open{transform:none}
-#sheet .head{padding:14px 18px 8px;font-weight:700;display:flex;align-items:center}
-#sheet .head .x{margin-left:auto;color:var(--sub);font-size:18px;padding:4px 8px}
-#sheet .list{overflow-y:auto;padding:4px 10px 14px}
-#sheet .opt{display:flex;align-items:center;gap:12px;padding:13px 10px;border-radius:12px;font-size:15px}
-#sheet .opt:active{background:var(--accent-soft)}
-#sheet .opt .ic{font-size:20px}
-#dlg{position:fixed;inset:0;z-index:140;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:28px}
-#dlg.open{display:flex}
-#dlg .box{background:var(--card);border-radius:16px;width:100%;max-width:340px;padding:20px}
-#dlg .t{font-size:16px;font-weight:700;margin-bottom:12px}
+#vTrack{position:absolute;inset:0;display:flex;align-items:stretch;will-change:transform;
+  transform:translate(0,0)}
+#viewer .slide{flex:0 0 100%;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;
+  transition:transform .18s ease}
+#viewer .slide.peek{transform:scale(1.05)}
+#viewer .slide.zoomed img{transform:scale(2.2);transition:transform .25s ease}
+#viewer img,#viewer video{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;
+  pointer-events:none;user-select:none;-webkit-user-drag:none}
+#viewer video{pointer-events:auto}
+.v-top{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;align-items:center;gap:10px;
+  padding:calc(var(--safe-t) + 10px) 14px 10px;color:#fff;
+  background:linear-gradient(rgba(0,0,0,.55),transparent);opacity:1;transition:opacity .25s}
+.v-top.hidden{opacity:0;pointer-events:none}
+.v-top .v-count{flex:1;font-size:14px;font-weight:600}
+.v-top .v-btn{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:16px;
+  display:flex;align-items:center;justify-content:center}
+.v-bottom{position:absolute;left:0;right:0;bottom:0;z-index:6;display:flex;align-items:center;justify-content:space-around;
+  gap:10px;padding:14px 24px calc(var(--safe-b) + 14px);color:#fff;
+  background:linear-gradient(transparent,rgba(0,0,0,.55));opacity:1;transition:opacity .25s}
+.v-bottom.hidden{opacity:0;pointer-events:none}
+.v-bottom .v-btn{width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;font-size:22px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:transform .12s}
+.v-bottom .v-btn:active{transform:scale(.92)}
+.v-bottom .v-btn span{font-size:10px;font-weight:400}
+.v-bottom .v-btn.on{background:var(--accent)}
+.v-bottom .v-btn.danger{background:var(--danger)}
+#vHint{position:absolute;top:calc(var(--safe-t) + 60px);left:50%;transform:translateX(-50%);z-index:7;
+  color:#fff;font-size:13px;background:rgba(0,0,0,.45);padding:6px 14px;border-radius:16px;opacity:0;
+  transition:opacity .2s;white-space:nowrap}
+#vHint.show{opacity:1}
+#vTrashZone{position:absolute;top:0;left:0;right:0;z-index:8;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:calc(var(--safe-t) + 12px) 0;background:rgba(229,69,69,.94);color:#fff;font-size:14px;font-weight:600;
+  transform:translateY(-100%);transition:transform .2s}
+#vTrashZone.show{transform:translateY(0)}
+#vTrashZone .ic{font-size:28px}
+
+/* ============ ??? ============ */
+#selbar{position:fixed;left:0;right:0;bottom:0;z-index:80;display:flex;align-items:center;gap:10px;
+  padding:10px 14px calc(var(--safe-b) + 10px);background:color-mix(in srgb,var(--card) 94%,transparent);
+  backdrop-filter:blur(14px);border-top:1px solid var(--line);transform:translateY(120%);transition:transform .25s}
+#selbar.show{transform:translateY(0)}
+#selbar .count{flex:1;font-size:14px;font-weight:600;white-space:nowrap}
+#selbar .sbtn{height:40px;padding:0 16px;border-radius:20px;background:var(--bg);border:1px solid var(--line);font-size:14px}
+#selbar .sbtn.green{background:var(--accent);color:#fff;border:none}
+#selbar .sbtn.danger{background:var(--danger);color:#fff;border:none}
+
+/* ============ ???? / ??? ============ */
+#sheet{position:fixed;inset:0;z-index:110;background:rgba(0,0,0,.4);display:none;align-items:flex-end}
+#sheet.open{display:flex}
+#sheet .panel{width:100%;background:var(--card);border-radius:18px 18px 0 0;padding:10px 0 calc(var(--safe-b) + 14px);
+  animation:up .22s ease}
+@keyframes up{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
+#sheet .head{display:flex;align-items:center;padding:12px 18px 6px;font-size:13px;color:var(--sub);font-weight:600}
+#sheet .head .x{margin-left:auto;font-size:18px;color:var(--sub);padding:4px}
+#sheet .opt{display:flex;align-items:center;gap:14px;padding:14px 20px;font-size:16px;border-top:1px solid var(--line)}
+#sheet .opt .ic{font-size:20px;width:24px;text-align:center}
+#dlg,#updateDlg{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}
+#dlg.open,#updateDlg.open{display:flex}
+#dlg .box,#updateDlg .box{width:min(340px,86%);background:var(--card);border-radius:16px;padding:20px}
+#dlg .t,#updateDlg .t{font-size:16px;font-weight:700;margin-bottom:12px;text-align:center}
 #dlg input{width:100%;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);
   color:var(--fg);padding:0 12px;font-size:15px;outline:none}
 #dlg input:focus{border-color:var(--accent)}
-#dlg .btns{display:flex;gap:10px;margin-top:18px}
-#dlg .btns button{flex:1;height:42px;border-radius:10px;font-size:15px;font-weight:600}
-#dlg .ok{background:var(--accent);color:#fff}
-#dlg .no{background:var(--bg);color:var(--fg)}
+#dlg .btns,#updateDlg .btns{display:flex;gap:10px;margin-top:18px}
+#dlg .btns button,#updateDlg .btns button{flex:1;height:42px;border-radius:10px;font-size:15px;font-weight:600}
+#dlg .ok,#updateDlg .ok{background:var(--accent);color:#fff}
+#dlg .no,#updateDlg .no{background:var(--bg);color:var(--fg)}
+#updateDlg .ver{font-size:13px;color:var(--accent);font-weight:700;text-align:center;margin-bottom:8px}
+#updateDlg .log{max-height:160px;overflow-y:auto;background:var(--bg);border-radius:10px;padding:10px 12px;
+  font-size:12px;line-height:1.6;color:var(--sub);white-space:pre-wrap;word-break:break-word}
+
+/* ============ ?? ============ */
 .set-group{background:var(--card);border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
 .set-h2{padding:14px 16px 6px;font-size:12px;color:var(--sub);font-weight:600}
 .set-row{display:flex;align-items:center;gap:10px;padding:14px 16px;border-top:1px solid var(--line)}
 .set-row .tt{flex:1}
 .set-row .tt .d{font-size:12px;color:var(--sub);margin-top:2px}
+.set-row .arrow{color:var(--sub);font-size:15px}
 .switch{width:46px;height:26px;border-radius:13px;background:#d8d8d8;position:relative;flex:none;transition:background .2s}
 .switch.on{background:var(--green)}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;
   transition:transform .2s cubic-bezier(.2,.8,.2,1)}
 .switch.on::after{transform:translateX(20px)}
+
+/* ============ Toast ============ */
 #toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 26px);transform:translateX(-50%) translateY(10px);
-  background:rgba(0,0,0,.82);color:#fff;padding:10px 18px;border-radius:22px;font-size:14px;z-index:200;
-  opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+  background:rgba(0,0,0,.82);color:#fff;padding:10px 16px;border-radius:22px;font-size:14px;z-index:200;
+  display:flex;align-items:center;gap:14px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;
+  max-width:88%}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast .act{color:#7ab8ff;font-weight:700;font-size:14px;padding:4px}
+
+/* ============ FAB ============ */
 #fab{position:fixed;right:18px;bottom:calc(var(--bar-h) + var(--safe-b) + 18px);z-index:60;width:56px;height:56px;
   border-radius:50%;background:var(--accent);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;
   box-shadow:0 8px 20px rgba(46,88,232,.4)}
@@ -133,47 +102,66 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 <body>
 <header id="topbar">
   <img class="logo" src="icon-192.png" alt="">
-  <h1 id="title">相册</h1>
-  <button class="tb-btn" id="btn-add" aria-label="添加">＋</button>
+  <h1 id="title">??</h1>
+  <button class="tb-btn" id="btn-add" aria-label="??">?</button>
 </header>
 
 <main>
   <section class="view active" id="view-albums"><div id="albums"></div><div style="height:80px"></div></section>
   <section class="view" id="view-photos"><div id="photos"></div><div style="height:120px"></div></section>
+  <section class="view" id="view-trash"><div id="trash"></div></section>
   <section class="view" id="view-settings"></section>
 </main>
 
 <nav id="tabbar">
-  <div class="tab on" data-view="albums"><span class="ic">🖼️</span>相册</div>
-  <div class="tab" data-view="photos"><span class="ic">📷</span>照片</div>
-  <div class="tab" data-view="settings"><span class="ic">⚙️</span>设置</div>
+  <div class="tab on" data-view="albums"><span class="ic">???</span>??</div>
+  <div class="tab" data-view="photos"><span class="ic">??</span>??</div>
+  <div class="tab" data-view="trash"><span class="ic">???<span class="bdg" id="trashBdg" style="display:none">0</span></span>???</div>
+  <div class="tab" data-view="settings"><span class="ic">??</span>??</div>
 </nav>
 
-<div id="fab">＋</div>
+<div id="fab">?</div>
 
+<!-- ???????????? / ???? / ???? / ????? / ?? Peek -->
 <div id="viewer">
-  <div class="v-idx" id="vIdx"></div>
-  <div class="track" id="vTrack"></div>
-  <div class="v-top"><span id="vName"></span><button class="close" id="vClose">✕</button></div>
+  <div id="vTrack"></div>
+  <div id="vTrashZone"><span class="ic">???</span><span>???????</span></div>
+  <div id="vHint">? ???? ? ? ????</div>
+  <div class="v-top hidden" id="vTop">
+    <span class="v-count" id="vCount">1 / 1</span>
+    <button class="v-btn" id="vClose">?</button>
+  </div>
+  <div class="v-bottom hidden" id="vBottom"></div>
 </div>
 
 <div id="selbar">
-  <span class="count" id="selCount">0 项</span>
-  <button class="sbtn" id="selAll">全选</button>
-  <button class="sbtn green" id="selMove">移动到</button>
-  <button class="sbtn" id="selDel" style="display:none">移除</button>
+  <span class="count" id="selCount">0 ?</span>
+  <button class="sbtn" id="selAll">??</button>
+  <button class="sbtn green" id="selMove">???</button>
+  <button class="sbtn danger" id="selDel">??</button>
 </div>
 
 <div id="sheet">
-  <div class="head">移动到相册<span class="x" id="sheetX">✕</span></div>
-  <div class="list" id="sheetList"></div>
+  <div class="panel">
+    <div class="head"><span id="sheetTitle">????</span><span class="x" id="sheetX">?</span></div>
+    <div class="list" id="sheetList"></div>
+  </div>
 </div>
 
 <div id="dlg">
   <div class="box">
-    <div class="t" id="dlgTitle">标题</div>
-    <input id="dlgInput" placeholder="请输入名称">
-    <div class="btns"><button class="no" id="dlgCancel">取消</button><button class="ok" id="dlgOk">确定</button></div>
+    <div class="t" id="dlgTitle">??</div>
+    <input id="dlgInput" placeholder="?????">
+    <div class="btns"><button class="no" id="dlgCancel">??</button><button class="ok" id="dlgOk">??</button></div>
+  </div>
+</div>
+
+<div id="updateDlg">
+  <div class="box">
+    <div class="t">?????</div>
+    <div class="ver" id="updVer"></div>
+    <div class="log" id="updLog"></div>
+    <div class="btns"><button class="no" id="updLater">??</button><button class="ok" id="updNow">????</button></div>
   </div>
 </div>
 
@@ -181,22 +169,25 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 
 <script>
 "use strict";
-/* ============ 原生桥接（Android APK） ============ */
+/* ============ ???? ============ */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
+const APP_VERSION = "1.0.2";
+const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
-let phoneAlbum = null;      // 当前浏览的手机相册 id
-let phoneMedia = [];        // 当前手机相册媒体
+let phoneAlbum = null;      // ????????? id
+let phoneMedia = [];        // ????????
 
-/* ============ 数据层（IndexedDB，存本 App 相册） ============ */
+/* ============ ????IndexedDB? ============ */
 const DB_NAME = "picaphoto";
 let db = null;
 function openDB(){
   return new Promise((res,rej)=>{
-    const rq = indexedDB.open(DB_NAME, 1);
+    const rq = indexedDB.open(DB_NAME, 2);
     rq.onupgradeneeded = e => {
       const d = e.target.result;
       if(!d.objectStoreNames.contains("media")) d.createObjectStore("media", {keyPath:"id"});
       if(!d.objectStoreNames.contains("albums")) d.createObjectStore("albums", {keyPath:"id"});
+      if(!d.objectStoreNames.contains("trash")) d.createObjectStore("trash", {keyPath:"id"});
     };
     rq.onsuccess = e => { db = e.target.result; res(db); };
     rq.onerror = () => rej(rq.error);
@@ -207,31 +198,56 @@ const storeGet = s => new Promise(r => { const q = tx(s).getAll(); q.onsuccess =
 async function storePut(store, obj){ return new Promise(r => { tx(store,"readwrite").put(obj).onsuccess = r; }); }
 async function storeDel(store, id){ return new Promise(r => { tx(store,"readwrite").delete(id).onsuccess = r; }); }
 
-/* ============ 状态 ============ */
+/* ============ ?? ============ */
 let media = [];
 let albums = [];
+let appTrash = [];
+let phoneTrash = [];
+let trashList = [];
 let currentView = "albums";
 let currentAlbum = null;
 let selection = new Set();
 let multi = false;
 let theme = localStorage.getItem("pp_theme") || "auto";
 let urls = new Map();
+let lastTrashed = null;
+let favs = new Set(JSON.parse(localStorage.getItem("pp_favs")||"[]"));
 
 const $ = s => document.querySelector(s);
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
-function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),1900); }
+function toast(msg, act, fn){
+  const t=$("#toast");
+  t.innerHTML = "<span>"+escapeHtml(msg)+"</span>" + (fn ? '<button class="act" id="toastAct">'+escapeHtml(act)+"</button>" : "");
+  t.classList.add("show"); clearTimeout(t._h);
+  const a=$("#toastAct");
+  if(a){ a.onclick=()=>{ t.classList.remove("show"); fn(); }; }
+  t._h=setTimeout(()=>t.classList.remove("show"),2600);
+}
 function isVideo(m){ return (m.type||m.mime||"").startsWith("video/"); }
 function itemKey(m){ return m.uri || m.id; }
-function objURL(m){ if(m.uri) return m.uri; if(urls.has(m.id)) return urls.get(m.id); const u=URL.createObjectURL(m.blob); urls.set(m.id,u); return u; }
+function objURL(m){
+  if(m.uri) return m.uri;
+  if(urls.has(m.id)) return urls.get(m.id);
+  if(!m.blob) return "";
+  const u=URL.createObjectURL(m.blob); urls.set(m.id,u); return u;
+}
 function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function isFav(m){ return m.uri ? favs.has(m.uri) : favs.has(m.id); }
+function toggleFav(m){
+  const k = m.uri || m.id;
+  if(favs.has(k)) favs.delete(k); else favs.add(k);
+  localStorage.setItem("pp_favs", JSON.stringify([...favs]));
+  updateViewerChrome();
+}
 function applyTheme(){
   const t = theme === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme;
   document.documentElement.dataset.theme = t;
   const m = document.querySelector('meta[name="theme-color"]');
   if(m) m.content = t === "dark" ? "#17181c" : "#f2f3f5";
 }
+function vibrate(ms){ try{ navigator.vibrate && navigator.vibrate(ms||15); }catch(e){} }
 
-/* ============ 手机相册（原生桥接） ============ */
+/* ============ ?????????? ============ */
 function refreshPhoneAlbums(){
   if(!BRIDGE) return;
   try { phoneAlbums = BRIDGE.hasPermission() ? JSON.parse(BRIDGE.readAlbums()) : []; } catch(e){ phoneAlbums=[]; }
@@ -239,13 +255,11 @@ function refreshPhoneAlbums(){
 function requestPhonePermission(){
   if(!BRIDGE) return;
   BRIDGE.requestPermission();
-  toast("请在系统弹窗中允许访问照片");
+  toast("?????????????");
   setTimeout(()=>{ refreshPhoneAlbums(); renderAlbums(); }, 1600);
 }
 function openPhoneAlbum(id, name){
-  phoneAlbum = id;
-  currentAlbum = null;
-  currentView = "photos";
+  phoneAlbum = id; currentAlbum = null; currentView = "photos";
   exitMulti();
   try { phoneMedia = JSON.parse(BRIDGE.readMedia(id)); } catch(e){ phoneMedia=[]; }
   switchView("photos");
@@ -256,37 +270,36 @@ function exitPhoneMode(){
   switchView("albums");
 }
 
-/* ============ 我的相册（App 内） ============ */
+/* ============ ???? / ???? ============ */
 function renderAlbums(){
   const box = $("#albums");
   box.className = "alb-grid";
   box.innerHTML = "";
   box.appendChild(document.createElement("div")).className = "set-h full";
-  box.lastChild.textContent = "我的相册";
-  const allAlb = { name:"全部照片", count:media.length, id:null };
+  box.lastChild.textContent = "????";
+  const allAlb = { name:"????", count:media.length, id:null };
   [allAlb, ...albums].forEach(a => {
     const items = a.id===null ? media : media.filter(m => m.album === a.id);
     const cover = items.find(m=>!isVideo(m)) || items[0];
     const el = document.createElement("div");
     el.className = "alb";
     el.innerHTML = `<div class="cover">${cover?'<img src="'+objURL(cover)+'" alt="">':'<div style="height:100%"></div>'}</div>
-      <div class="meta"><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${items.length} 个</div></div>`;
+      <div class="meta"><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${items.length} ?</div></div>`;
     el.addEventListener("click", ()=>{ currentAlbum = a.id; openPhotosView(a.id); });
     let th;
-    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ navigator.vibrate&&navigator.vibrate(20); if(a.id!==null) albumMenu(a); },500); },{passive:true});
+    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ vibrate(15); if(a.id!==null) albumMenu(a); },500); },{passive:true});
     el.addEventListener("touchmove", ()=>{ clearTimeout(th); },{passive:true});
     el.addEventListener("touchend", ()=>{ clearTimeout(th); });
     box.appendChild(el);
   });
 
-  /* 手机相册 */
   if(BRIDGE){
     box.appendChild(document.createElement("div")).className = "set-h full";
-    box.lastChild.textContent = "手机相册";
+    box.lastChild.textContent = "????";
     if(!BRIDGE.hasPermission()){
       const p = document.createElement("div");
       p.className = "full empty";
-      p.innerHTML = `<div class="big">🖼️</div>需要权限才能读取手机相册<br><button class="big-btn" id="btnPerm">授权读取相册</button>`;
+      p.innerHTML = `<div class="big">???</div>????????????<br><button class="big-btn" id="btnPerm">??????</button>`;
       box.appendChild(p);
       p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
     } else {
@@ -294,42 +307,46 @@ function renderAlbums(){
         const el = document.createElement("div");
         el.className = "alb";
         el.innerHTML = `<div class="cover">${a.cover?'<img src="'+a.cover+'" alt="">':'<div style="height:100%"></div>'}</div>
-          <div class="meta"><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${a.count} 个</div></div>`;
+          <div class="meta"><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${a.count} ?</div></div>`;
         el.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
         box.appendChild(el);
       });
       if(!phoneAlbums.length){
         const p = document.createElement("div");
         p.className = "full empty";
-        p.innerHTML = `<div class="big">📭</div>手机相册为空`;
+        p.innerHTML = `<div class="big">??</div>??????`;
         box.appendChild(p);
       }
     }
   }
 }
 function albumMenu(a){
-  sheet([{ic:"✏️",t:"重命名",f:()=>promptInput("重命名相册", a.name, async v=>{ if(v&&v!==a.name){ a.name=v; await storePut("albums",a); saveState(); } })},
-          {ic:"🗑️",t:"删除相册",f:async ()=>{ if(confirm("删除相册「"+a.name+"」？照片会保留在全部照片中。")){ media.forEach(m=>{ if(m.album===a.id) m.album=null; }); media.forEach(m=>storePut("media",m)); await storeDel("albums",a.id); saveState(); }}}]);
+  sheet([{ic:"??",t:"???",f:()=>promptInput("?????", a.name, async v=>{ if(v&&v!==a.name){ a.name=v; await storePut("albums",a); saveState(); } })},
+          {ic:"???",t:"????",f:async ()=>{ if(confirm("?????"+a.name+"??????????????")){ media.forEach(m=>{ if(m.album===a.id) m.album=null; }); media.forEach(m=>storePut("media",m)); await storeDel("albums",a.id); saveState(); }}}]);
 }
 function openPhotosView(albumId){ currentAlbum=albumId; currentView="photos"; switchView("photos"); }
 function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum===null?media:media.filter(m=>m.album===currentAlbum)); }
 
+/* ============ ???? ============ */
 function renderPhotos(){
   const box = $("#photos");
   const items = visibleMedia();
-  if(!items.length){ box.innerHTML = `<div class="empty"><div class="big">📷</div>还没有照片<br><span style="font-size:13px">点右下角 ＋ 从手机相册选择</span></div>`; return; }
+  if(!items.length){
+    box.innerHTML = `<div class="empty"><div class="big">??</div>?????<br><span style="font-size:13px">???? ? ???????</span></div>`;
+    return;
+  }
   box.className = "ph-grid";
   box.innerHTML = "";
   items.forEach(m => {
     const key = itemKey(m);
     const el = document.createElement("div");
     el.className = "ph";
-    el.innerHTML = `<img src="${objURL(m)}" alt=""><span class="sel">✓</span>${isVideo(m)?'<span class="dur">▶</span>':''}`;
+    el.innerHTML = `<img src="${objURL(m)}" alt=""><span class="sel">?</span>${isVideo(m)?'<span class="dur">?</span>':''}`;
     if(multi && selection.has(key)) el.classList.add("sel-on");
     if(multi) el.classList.add("multi");
-    el.addEventListener("click", ()=>{ if(multi){ toggleSel(key, el); } else { openViewer(items, items.indexOf(m)); } });
+    el.addEventListener("click", ()=>{ if(multi){ toggleSel(key, el); } else { openViewer(items, items.indexOf(m), "normal"); } });
     let th;
-    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ if(!multi){ enterMulti(); } },500); },{passive:true});
+    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ if(!multi){ vibrate(15); enterMulti(); } },500); },{passive:true});
     el.addEventListener("touchmove", ()=>{ clearTimeout(th); },{passive:true});
     el.addEventListener("touchend", ()=>{ clearTimeout(th); });
     box.appendChild(el);
@@ -344,84 +361,419 @@ function enterMulti(){
   multi = true; selection = new Set(); renderPhotos();
   $("#selbar").classList.add("show");
   $("#selDel").style.display = phoneAlbum!==null ? "none" : "";
-  $("#title").textContent = "选择照片";
+  $("#title").textContent = "????";
 }
 function exitMulti(){
   multi = false; selection = new Set();
   $("#selbar").classList.remove("show");
   renderPhotos();
-  $("#title").textContent = phoneAlbum!==null ? "手机相册" : (currentView==="photos"?"照片":"相册");
+  $("#title").textContent = phoneAlbum!==null ? "????" : (currentView==="photos"?"??":"??");
 }
-function updateSelbar(){ $("#selCount").textContent = selection.size + " 项"; }
+function updateSelbar(){ $("#selCount").textContent = selection.size + " ?"; }
 
-/* 移动到相册 */
+/* ???? */
 function moveSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
   if(phoneAlbum!==null){
-    const opts = albums.map(a=>({ic:"📁",t:a.name,f:()=>nativeMove(a.name,list)}));
-    opts.push({ic:"➕",t:"新建相册…",f:()=>promptInput("新建相册","",async v=>{ if(v){ nativeMove(v,list); } })});
-    sheet(opts);
+    const opts = albums.map(a=>({ic:"??",t:a.name,f:()=>nativeMove(a.name,list)}));
+    opts.push({ic:"?",t:"?????",f:()=>promptInput("????","",async v=>{ if(v){ nativeMove(v,list); } })});
+    sheet(opts,"?????");
     return;
   }
-  const opts = [{ic:"🗂️",t:"移回未整理",f:async ()=>{ list.forEach(m=>{m.album=null;}); list.forEach(m=>storePut("media",m)); saveState(); }},
-    ...albums.map(a=>({ic:"📁",t:a.name,f:async ()=>{ list.forEach(m=>{m.album=a.id;}); list.forEach(m=>storePut("media",m)); saveState(); }}))];
-  sheet(opts);
+  const opts = [{ic:"???",t:"?????",f:async ()=>{ list.forEach(m=>{m.album=null;}); list.forEach(m=>storePut("media",m)); saveState(); }},
+    ...albums.map(a=>({ic:"??",t:a.name,f:async ()=>{ list.forEach(m=>{m.album=a.id;}); list.forEach(m=>storePut("media",m)); saveState(); }}))];
+  sheet(opts,"?????");
 }
 function nativeMove(name, list){
   try {
     const uris = JSON.stringify(list.map(m=>m.uri));
     const res = JSON.parse(BRIDGE.moveToAlbum(name, uris));
     const ok = res.filter(r=>r.ok).length;
-    toast(`已移动 ${ok} 项到「${name}」` + (ok<res.length?`，${res.length-ok} 项无权限跳过`:""));
-  } catch(e){ toast("移动失败："+e); }
+    toast(`??? ${ok} ???${name}?` + (ok<res.length?`?${res.length-ok} ??????`:""));
+  } catch(e){ toast("?????"+e); }
   exitPhoneMode();
 }
 async function removeSelected(){
   if(phoneAlbum!==null) return;
   const ids = [...selection].filter(k => k && !k.startsWith("content:"));
   if(!ids.length) return;
-  if(!confirm("从 PicaPhoto 中移除选中的 "+ids.length+" 项？（不影响手机原图）")) return;
-  for(const k of ids){ const m = media.find(x=>x.id===k); if(m){ urls.get(k)&&URL.revokeObjectURL(urls.get(k)); urls.delete(k); await storeDel("media",k); } }
-  media = media.filter(m=>!ids.includes(m.id));
+  if(!confirm("? PicaPhoto ?????? "+ids.length+" ?????????????")) return;
+  for(const k of ids){ const m = media.find(x=>x.id===k); if(m){ await trashOne(m); } }
+  exitMulti();
   saveState();
 }
 
-/* ============ 全屏查看器 ============ */
-let viewerList=[], viewerIdx=0, chromeHide=false;
-function openViewer(list, idx){
-  viewerList=list; viewerIdx=idx; chromeHide=false;
+/* ============ ??? ============ */
+async function refreshTrash(){
+  appTrash = await storeGet("trash");
+  if(BRIDGE && BRIDGE.hasPermission()){
+    try{ phoneTrash = JSON.parse(BRIDGE.readTrash()); }catch(e){ phoneTrash=[]; }
+  } else phoneTrash = [];
+  trashList = [
+    ...appTrash.map(t=>({id:t.id, name:t.name, mime:t.mime, isVideo:t.isVideo, trashedAt:t.trashedAt, blob:t.blob, fromApp:true})),
+    ...phoneTrash.map(t=>({id:"p_"+t.uri, name:t.name, mime:t.mime, isVideo:t.isVideo, uri:t.uri, trashedAt:(t.dateAdded||0)*1000, fromPhone:true}))
+  ];
+  const b=$("#trashBdg");
+  b.textContent = trashList.length>99 ? "99+" : String(trashList.length);
+  b.style.display = trashList.length ? "flex" : "none";
+}
+function renderTrash(){
+  const box=$("#trash");
+  box.className="ph-grid";
+  box.innerHTML="";
+  if(!trashList.length){
+    box.innerHTML=`<div class="empty full"><div class="big">???</div>??????<br><span style="font-size:13px">??????????????</span></div>`;
+    return;
+  }
+  trashList.forEach(m=>{
+    const el=document.createElement("div"); el.className="ph";
+    el.innerHTML=`<img src="${objURL(m)}" alt="">${m.isVideo?'<span class="dur">?</span>':''}`;
+    el.addEventListener("click", ()=>{ openViewer(trashList, trashList.indexOf(m), "trash"); });
+    let th;
+    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ vibrate(15); sheetTrashItem(m); },500); },{passive:true});
+    el.addEventListener("touchmove", ()=>{ clearTimeout(th); },{passive:true});
+    el.addEventListener("touchend", ()=>{ clearTimeout(th); });
+    box.appendChild(el);
+  });
+  const actions=document.createElement("div");
+  actions.className="trash-actions full";
+  actions.innerHTML=`<button class="big-btn ghost" id="btnRestoreAll">?? ????</button>
+    <button class="big-btn danger" id="btnEmpty">?????</button>`;
+  box.appendChild(actions);
+  $("#btnRestoreAll").addEventListener("click", restoreAllTrash);
+  $("#btnEmpty").addEventListener("click", emptyTrash);
+}
+function sheetTrashItem(m){
+  sheet([{ic:"??",t:"??",f:()=>restoreFromTrash(m)},
+          {ic:"???",t:"????",f:()=>permanentDelete(m)}],"?????");
+}
+async function restoreFromTrash(m){
+  if(m.fromPhone){
+    try{
+      const res=JSON.parse(BRIDGE.restoreTrash(JSON.stringify([m.uri])));
+      if(res[0]&&res[0].ok) toast("?????? PicaPhoto ???");
+      else toast("????");
+    }catch(e){ toast("?????"+e); }
+  } else {
+    const rec=appTrash.find(t=>t.id===m.id);
+    if(rec){
+      const obj={id:rec.id, name:rec.name, type:rec.mime, size:0, addedAt:Date.now(), album:null, blob:rec.blob};
+      media.push(obj);
+      await storePut("media",obj);
+      await storeDel("trash",rec.id);
+      toast("???");
+    }
+  }
+  await refreshTrash(); renderTrash();
+  if(currentView==="photos") renderPhotos();
+  if(currentView==="albums") renderAlbums();
+}
+async function permanentDelete(m){
+  if(m.fromPhone){
+    try{ JSON.parse(BRIDGE.deleteTrash(JSON.stringify([m.uri]))); }catch(e){}
+  } else {
+    if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); }
+    await storeDel("trash", m.id);
+  }
+  toast("?????");
+  await refreshTrash(); renderTrash();
+}
+async function restoreAllTrash(){
+  const apps=appTrash.slice(), ph=phoneTrash.slice();
+  for(const t of apps){
+    const obj={id:t.id, name:t.name, type:t.mime, size:0, addedAt:Date.now(), album:null, blob:t.blob};
+    media.push(obj);
+    await storePut("media",obj);
+    await storeDel("trash",t.id);
+  }
+  if(ph.length && BRIDGE){
+    try{ JSON.parse(BRIDGE.restoreTrash(JSON.stringify(ph.map(t=>t.uri)))); }catch(e){}
+  }
+  toast("??? "+trashList.length+" ?");
+  await refreshTrash(); renderTrash();
+  if(currentView==="photos") renderPhotos();
+  if(currentView==="albums") renderAlbums();
+}
+async function emptyTrash(){
+  if(!trashList.length) return;
+  if(!confirm("????????????????")) return;
+  for(const m of trashList){
+    if(m.fromPhone){ try{ JSON.parse(BRIDGE.deleteTrash(JSON.stringify([m.uri]))); }catch(e){} }
+    else { if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); } await storeDel("trash",m.id); }
+  }
+  toast("??????");
+  await refreshTrash(); renderTrash();
+}
+
+/* ============ ????? / ???Phoom ??? ============ */
+async function trashOne(m){
+  if(m.uri && m.uri.startsWith("content:")){
+    try{
+      const res=JSON.parse(BRIDGE.trashMedia(JSON.stringify([m.uri])));
+      if(res[0]&&res[0].ok){
+        lastTrashed={type:"phone", uri:m.uri, dst:res[0].dst};
+        const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
+        toastTrash();
+      } else toast("???????");
+    }catch(e){ toast("???"+e); }
+  } else {
+    const tr={id:m.id, name:m.name, mime:m.type||"", isVideo:!!(m.type||"").startsWith("video/"), trashedAt:Date.now(), blob:m.blob};
+    await storePut("trash",tr);
+    await storeDel("media", m.id);
+    const idx=media.indexOf(m); if(idx>=0) media.splice(idx,1);
+    lastTrashed={type:"app", item:tr};
+    toastTrash();
+  }
+  await refreshTrash();
+}
+function toastTrash(){
+  toast("??????","??",()=>undoTrash());
+}
+async function undoTrash(){
+  if(!lastTrashed) return;
+  const t=lastTrashed; lastTrashed=null;
+  if(t.type==="phone"){
+    try{
+      const res=JSON.parse(BRIDGE.restoreTrash(JSON.stringify([t.dst||t.uri])));
+      if(res[0]&&res[0].ok){ refreshPhoneAlbums(); toast("???"); }
+      else toast("????");
+    }catch(e){ toast("?????"+e); }
+  } else {
+    const tr=t.item;
+    const obj={id:tr.id, name:tr.name, type:tr.mime, size:0, addedAt:Date.now(), album:null, blob:tr.blob};
+    media.push(obj);
+    await storeDel("trash",tr.id);
+    await storePut("media",obj);
+    toast("???");
+  }
+  await refreshTrash();
+  if(currentView==="photos") renderPhotos();
+  if(currentView==="albums") renderAlbums();
+  updateViewerChrome();
+}
+
+/* ============ ??????Phoom ??? ============ */
+let viewerList=[], viewerIdx=0, viewerMode="normal", chromeShow=false;
+let g=null, longT=null, lastTap=0, zoomed=false, chromeTimer=null;
+
+function openViewer(list, idx, mode){
+  viewerList=list; viewerIdx=idx; viewerMode=mode||"normal"; chromeShow=false; zoomed=false;
   $("#viewer").classList.add("open");
   renderViewer();
+  updateViewerChrome();
   document.body.style.overflow="hidden";
+  showChrome(false);
+  $("#vHint").classList.add("show");
+  $("#vHint").textContent = mode==="trash" ? "? ???? ? ? ????" : "? ???? ? ? ????";
+  setTimeout(()=>{ if($("#viewer").classList.contains("open")) $("#vHint").classList.remove("show"); },2200);
+}
+function closeViewer(){
+  $("#viewer").classList.remove("open");
+  document.body.style.overflow="";
+  clearTimeout(longT); clearTimeout(chromeTimer); g=null;
+  if(currentView==="photos") renderPhotos();
+  if(currentView==="trash") renderTrash();
 }
 function renderViewer(){
   const track=$("#vTrack"); track.innerHTML="";
+  track.style.transition="none";
+  track.style.transform=`translate(calc(${-viewerIdx*100}%), 0px)`;
   viewerList.forEach((m,i)=>{
     const s=document.createElement("div"); s.className="slide";
-    if(isVideo(m)){ s.innerHTML=`<video src="${objURL(m)}" controls playsinline></video>`; }
-    else { s.innerHTML=`<img src="${objURL(m)}" alt="">`; }
-    s.style.transform=`translateX(${(i-viewerIdx)*100}%)`;
+    const src=objURL(m);
+    if(isVideo(m)){ s.innerHTML=`<video src="${src}" playsinline ${chromeShow?"controls":""}></video>`; }
+    else { s.innerHTML=`<img src="${src}" alt="">`; }
     track.appendChild(s);
   });
-  $("#vName").textContent=viewerList[viewerIdx].name||"";
-  $("#vIdx").textContent=(viewerIdx+1)+" / "+viewerList.length;
+  requestAnimationFrame(()=>{ track.style.transition="transform .32s cubic-bezier(.2,.8,.2,1)"; });
 }
-function moveViewer(step){ viewerIdx=Math.max(0,Math.min(viewerList.length-1,viewerIdx+step)); renderViewer(); }
-$("#vClose").addEventListener("click", ()=>{ $("#viewer").classList.remove("open"); document.body.style.overflow=""; });
-$("#viewer").addEventListener("click", e=>{
-  if(e.target.closest("video")||e.target.closest(".v-top")) return;
-  chromeHide=!chromeHide;
-  document.querySelectorAll("#viewer .v-top,#viewer .v-idx").forEach(x=>x.style.opacity=chromeHide?0:1);
-});
-let tsx=0;
-$("#viewer").addEventListener("touchstart", e=>{ tsx=e.touches[0].clientX; },{passive:true});
-$("#viewer").addEventListener("touchend", e=>{ const dx=e.changedTouches[0].clientX-tsx; if(Math.abs(dx)>60) moveViewer(dx<0?1:-1); },{passive:true});
+function updateViewerChrome(){
+  const m=viewerList[viewerIdx];
+  if(!m) return;
+  $("#vCount").textContent=(viewerIdx+1)+" / "+viewerList.length;
+  const vb=$("#vBottom");
+  if(viewerMode==="trash"){
+    vb.innerHTML=`<button class="v-btn" id="vRestore">??<span>??</span></button>
+                  <button class="v-btn danger" id="vDel">???<span>??</span></button>`;
+    $("#vRestore").addEventListener("click", async ()=>{
+      const mm=viewerList[viewerIdx];
+      await restoreFromTrash(mm);
+      viewerList.splice(viewerIdx,1); afterViewerRemove();
+    });
+    $("#vDel").addEventListener("click", async ()=>{
+      const mm=viewerList[viewerIdx];
+      await permanentDelete(mm);
+      viewerList.splice(viewerIdx,1); afterViewerRemove();
+    });
+  } else {
+    const f=isFav(m);
+    vb.innerHTML=`<button class="v-btn ${f?'on':''}" id="vFav">${f?'?':'?'}<span>${f?'???':'??'}</span></button>
+                  <button class="v-btn" id="vUndo" style="${lastTrashed?'':'display:none'}">??<span>??</span></button>
+                  <button class="v-btn" id="vAlbum">??<span>??</span></button>`;
+    $("#vFav").addEventListener("click", ()=>{ toggleFav(viewerList[viewerIdx]); });
+    $("#vUndo").addEventListener("click", ()=>{ undoTrash(); });
+    $("#vAlbum").addEventListener("click", ()=>{ moveCurrent(); });
+  }
+}
+function afterViewerRemove(){
+  if(!viewerList.length){ closeViewer(); return; }
+  if(viewerIdx>=viewerList.length) viewerIdx=viewerList.length-1;
+  renderViewer(); updateViewerChrome();
+}
+function moveViewer(step){
+  viewerIdx=Math.max(0,Math.min(viewerList.length-1,viewerIdx+step));
+  zoomed=false;
+  renderViewer(); updateViewerChrome();
+}
+function moveCurrent(){
+  const m=viewerList[viewerIdx];
+  if(!m) return;
+  if(m.uri && m.uri.startsWith("content:")){
+    const opts=albums.map(a=>({ic:"??",t:a.name,f:()=>{ nativeMove(a.name,[m]); closeViewer(); }}));
+    opts.push({ic:"?",t:"?????",f:()=>promptInput("????","",async v=>{ if(v){ nativeMove(v,[m]); closeViewer(); } })});
+    sheet(opts,"?????"); return;
+  }
+  const opts=[{ic:"???",t:"?????",f:async ()=>{ m.album=null; await storePut("media",m); toast("???"); }},
+    ...albums.map(a=>({ic:"??",t:a.name,f:async ()=>{ m.album=a.id; await storePut("media",m); toast("?????"+a.name+"?"); }}))];
+  sheet(opts,"?????");
+}
+function showChrome(show){
+  chromeShow=show;
+  $("#vTop").classList.toggle("hidden", !show);
+  $("#vBottom").classList.toggle("hidden", !show);
+  const v=$("#vTrack video"); if(v) v.controls=show;
+}
+function toggleChrome(){
+  showChrome(!chromeShow);
+  if(chromeShow){ clearTimeout(chromeTimer); chromeTimer=setTimeout(()=>{ showChrome(false); },2800); }
+  else clearTimeout(chromeTimer);
+}
 
-/* ============ 底部弹层 / 对话框 ============ */
-function sheet(opts){
+/* ---- ??????? / ???? / ???? / ????? / ?? Peek ---- */
+$("#viewer").addEventListener("touchstart", e=>{
+  if(e.touches.length>1) return;
+  const t=e.touches[0];
+  g={mode:null, sx:t.clientX, sy:t.clientY, dx:0, dy:0, moved:false, t0:Date.now(), long:false};
+  clearTimeout(longT);
+  longT=setTimeout(()=>{
+    if(g && !g.moved && g.mode===null){
+      g.long=true; vibrate(12);
+      const cur=$("#vTrack").children[viewerIdx];
+      if(cur) cur.classList.add("peek");
+      $("#vHint").classList.add("show");
+      $("#vHint").textContent = viewerMode==="trash" ? "? ???? ? ? ????" : "? ???? ? ? ????";
+    }
+  },360);
+},{passive:true});
+
+$("#viewer").addEventListener("touchmove", e=>{
+  if(!g) return;
+  const t=e.touches[0];
+  const dx=t.clientX-g.sx, dy=t.clientY-g.sy;
+  if(g.mode===null){
+    if(Math.abs(dx)>14 || Math.abs(dy)>14){
+      g.mode = Math.abs(dy)>Math.abs(dx) ? "v" : "h";
+      if(g.mode==="h"){ clearTimeout(longT); const cur=$("#vTrack").children[viewerIdx]; if(cur) cur.classList.remove("peek"); $("#vHint").classList.remove("show"); }
+    }
+  }
+  if(g.mode===null) return;
+  e.preventDefault();
+  g.dx=dx; g.dy=dy; g.moved=true;
+  const track=$("#vTrack");
+  track.style.transition="none";
+  if(g.mode==="h"){
+    track.style.transform=`translate(calc(${-viewerIdx*100}% + ${dx}px), 0px)`;
+  } else {
+    const cy=Math.max(-320,Math.min(320,dy));
+    const sc=Math.max(.86, 1-Math.abs(cy)/1400);
+    track.style.transform=`translate(calc(${-viewerIdx*100}%), ${cy}px) scale(${sc})`;
+    const zone=$("#vTrashZone");
+    zone.classList.toggle("show", viewerMode==="normal" && cy<-70);
+    $("#vHint").classList.toggle("show", !(cy<-70));
+    if(cy<-70) $("#vHint").textContent="???????";
+    else if(cy>80) $("#vHint").textContent="????";
+    else $("#vHint").textContent = viewerMode==="trash" ? "? ???? ? ? ????" : "? ???? ? ? ????";
+  }
+},{passive:false});
+
+$("#viewer").addEventListener("touchend", e=>{
+  clearTimeout(longT);
+  if(!g) return;
+  const g0=g; g=null;
+  const cur=$("#vTrack").children[viewerIdx];
+  if(cur) cur.classList.remove("peek");
+  $("#vHint").classList.remove("show");
+  $("#vTrashZone").classList.remove("show");
+  const track=$("#vTrack");
+  track.style.transition="transform .32s cubic-bezier(.2,.8,.2,1)";
+  if(g0.long && g0.mode==="v"){
+    if(g0.dy<-70) doTrashCurrent();
+    else if(g0.dy>70) closeViewer();
+    else track.style.transform=`translate(calc(${-viewerIdx*100}%), 0px)`;
+    return;
+  }
+  if(g0.mode==="h"){
+    if(g0.dx<-60) moveViewer(1);
+    else if(g0.dx>60) moveViewer(-1);
+    else track.style.transform=`translate(calc(${-viewerIdx*100}%), 0px)`;
+    return;
+  }
+  if(g0.mode==="v"){
+    if(g0.dy<-70){
+      track.style.transform=`translate(calc(${-viewerIdx*100}%), -120%) scale(.9)`;
+      setTimeout(()=>doTrashCurrent(),200);
+    } else if(g0.dy>70){
+      track.style.transform=`translate(calc(${-viewerIdx*100}%), 120%)`;
+      setTimeout(()=>closeViewer(),200);
+    } else {
+      track.style.transform=`translate(calc(${-viewerIdx*100}%), 0px)`;
+    }
+    return;
+  }
+  const now=Date.now();
+  if(!g0.moved && now-g0.t0<350){
+    if(now-lastTap<300){
+      zoomed=!zoomed;
+      const s=$("#vTrack").children[viewerIdx];
+      if(s) s.classList.toggle("zoomed", zoomed);
+      lastTap=0;
+    } else {
+      lastTap=now;
+      toggleChrome();
+    }
+  }
+},{passive:true});
+
+$("#viewer").addEventListener("touchcancel", ()=>{
+  clearTimeout(longT); g=null;
+  const cur=$("#vTrack").children[viewerIdx]; if(cur) cur.classList.remove("peek");
+  $("#vHint").classList.remove("show"); $("#vTrashZone").classList.remove("show");
+});
+$("#vClose").addEventListener("click", closeViewer);
+
+async function doTrashCurrent(){
+  const m=viewerList[viewerIdx];
+  if(!m) return;
+  if(viewerMode==="trash"){
+    await permanentDelete(m);
+  } else {
+    await trashOne(m);
+  }
+  viewerList.splice(viewerIdx,1);
+  afterViewerRemove();
+}
+
+/* ============ ???? / ??? ============ */
+function sheet(opts, title){
+  $("#sheetTitle").textContent = title || "????";
   const list=$("#sheetList"); list.innerHTML="";
-  opts.forEach(o=>{ const el=document.createElement("div"); el.className="opt"; el.innerHTML=`<span class="ic">${o.ic}</span>${o.t}`; el.addEventListener("click", ()=>{ closeSheet(); o.f(); }); list.appendChild(el); });
+  opts.forEach(o=>{
+    const el=document.createElement("div"); el.className="opt";
+    el.innerHTML=`<span class="ic">${o.ic}</span><span>${escapeHtml(o.t)}</span>`;
+    el.addEventListener("click", ()=>{ closeSheet(); o.f(); });
+    list.appendChild(el);
+  });
   $("#sheet").classList.add("open");
 }
 function closeSheet(){ $("#sheet").classList.remove("open"); }
@@ -432,68 +784,77 @@ function promptInput(title, value, onOk){
   const inp=$("#dlgInput"); inp.value=value||""; inp.focus();
   $("#dlg").classList.add("open");
   const ok=$("#dlgOk"), cancel=$("#dlgCancel");
-  ok.onclick=async ()=>{ const v=inp.value.trim(); if(!v){ toast("名称不能为空"); return; } $("#dlg").classList.remove("open"); await onOk(v); };
+  ok.onclick=async ()=>{ const v=inp.value.trim(); if(!v){ toast("??????"); return; } $("#dlg").classList.remove("open"); await onOk(v); };
   cancel.onclick=()=>{ $("#dlg").classList.remove("open"); };
   inp.onkeydown=e=>{ if(e.key==="Enter") ok.click(); };
 }
 
-/* ============ 添加媒体（App 内 / 系统相册） ============ */
+/* ============ ???? ============ */
 const fileInput=document.createElement("input");
 fileInput.type="file"; fileInput.multiple=true; fileInput.accept="image/*,video/*";
 fileInput.style.display="none"; document.body.appendChild(fileInput);
 async function addFiles(files){
   const arr=[...files];
-  for(const f of arr){ const m={ id:uid(), name:f.name, type:f.type, size:f.size, addedAt:Date.now(), album:currentView==="photos"&&phoneAlbum===null?currentAlbum:null, blob:f }; media.push(m); await storePut("media",m); }
-  saveState(); toast("已添加 "+arr.length+" 项");
+  for(const f of arr){
+    const m={ id:uid(), name:f.name, type:f.type, size:f.size, addedAt:Date.now(), album:(currentView==="photos"&&phoneAlbum===null)?currentAlbum:null, blob:f };
+    media.push(m); await storePut("media",m);
+  }
+  saveState(); toast("??? "+arr.length+" ?");
 }
 $("#btn-add").addEventListener("click", ()=>{ if(phoneAlbum!==null){ exitPhoneMode(); return; } fileInput.click(); });
 $("#fab").addEventListener("click", ()=>{ if(phoneAlbum===null) fileInput.click(); });
 fileInput.addEventListener("change", ()=>{ if(fileInput.files.length) addFiles(fileInput.files); fileInput.value=""; });
 
-/* ============ 设置 ============ */
+/* ============ ?? ============ */
 function renderSettings(){
   const s=$("#view-settings");
   const darkOn=theme==="dark"||(theme==="auto"&&matchMedia("(prefers-color-scheme: dark)").matches);
   s.innerHTML=`
-    <div class="set-h2">外观</div>
+    <div class="set-h2">??</div>
     <div class="set-group">
-      <div class="set-row"><div class="tt">深色模式<div class="d">跟随系统 / 手动切换</div></div>
+      <div class="set-row"><div class="tt">????<div class="d">???? / ????</div></div>
         <div class="switch ${darkOn?'on':''}" id="swDark"></div></div>
-      <div class="set-row" id="rowTheme"><div class="tt">主题<div class="d" id="themeDesc">${theme==="auto"?"跟随系统":theme==="dark"?"深色":"浅色"}</div></div></div>
+      <div class="set-row" id="rowTheme"><div class="tt">??<div class="d">${theme==="auto"?"????":theme==="dark"?"??":"??"}</div></div><span class="arrow">?</span></div>
     </div>
-    <div class="set-h2">数据</div>
+    <div class="set-h2">??</div>
     <div class="set-group">
-      <div class="set-row"><div class="tt">本 App 照片与视频<div class="d">共 ${media.length} 项（手机相册在「相册」页读取）</div></div></div>
-      <div class="set-row" id="rowClean"><div class="tt">清理本 App 数据<div class="d">删除 App 内照片与相册（不影响手机相册）</div></div></div>
+      <div class="set-row"><div class="tt">App ?????<div class="d">? ${media.length} ? ? ??? ${trashList.length} ?</div></div></div>
+      <div class="set-row" id="rowClean"><div class="tt">?? App ??<div class="d">?? App ???????????????</div></div></div>
     </div>
-    <div class="set-h2">关于</div>
+    <div class="set-h2">??</div>
     <div class="set-group">
-      <div class="set-row"><div class="tt">PicaPhoto 移动版<div class="d">v1.0.0 · 适配刘海/水滴/挖孔屏 · 主流机型相册 · 高刷高分屏</div></div></div>
+      <div class="set-row"><div class="tt">PicaPhoto ???<div class="d">v${APP_VERSION} ? Phoom ??? ? ??? ? ????</div></div></div>
+      <div class="set-row" id="rowUpdate"><div class="tt">????<div class="d">?? GitHub ????</div></div><span class="arrow">?</span></div>
     </div>`;
   $("#swDark").addEventListener("click", e=>{ const sw=e.currentTarget; theme=sw.classList.contains("on")?"light":"dark"; localStorage.setItem("pp_theme",theme); applyTheme(); renderSettings(); });
-  $("#rowTheme").addEventListener("click", ()=>{ sheet([{ic:"🌗",t:"跟随系统",f:()=>{theme="auto";localStorage.setItem("pp_theme","auto");applyTheme();renderSettings();}},
-      {ic:"☀️",t:"浅色",f:()=>{theme="light";localStorage.setItem("pp_theme","light");applyTheme();renderSettings();}},
-      {ic:"🌙",t:"深色",f:()=>{theme="dark";localStorage.setItem("pp_theme","dark");applyTheme();renderSettings();}}]); });
+  $("#rowTheme").addEventListener("click", ()=>{ sheet([{ic:"??",t:"????",f:()=>{theme="auto";localStorage.setItem("pp_theme","auto");applyTheme();renderSettings();}},
+      {ic:"??",t:"??",f:()=>{theme="light";localStorage.setItem("pp_theme","light");applyTheme();renderSettings();}},
+      {ic:"??",t:"??",f:()=>{theme="dark";localStorage.setItem("pp_theme","dark");applyTheme();renderSettings();}}],"??"); });
   $("#rowClean").addEventListener("click", async ()=>{
-    if(!confirm("确定清空本 App 内数据？")) return;
+    if(!confirm("????? App ????")) return;
     await new Promise(r=>{ tx("media","readwrite").clear().onsuccess=r; });
     await new Promise(r=>{ tx("albums","readwrite").clear().onsuccess=r; });
-    media=[]; albums=[]; urls.forEach(u=>URL.revokeObjectURL(u)); urls.clear(); saveState();
+    await new Promise(r=>{ tx("trash","readwrite").clear().onsuccess=r; });
+    media=[]; albums=[]; urls.forEach(u=>URL.revokeObjectURL(u)); urls.clear();
+    await refreshTrash(); saveState();
   });
+  $("#rowUpdate").addEventListener("click", ()=>checkUpdate(true));
 }
 
-/* ============ 视图切换 ============ */
+/* ============ ???? ============ */
 function switchView(name){
   currentView=name;
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on", t.dataset.view===name));
-  $("#fab").style.display = (name==="photos"&&phoneAlbum!==null) ? "none" : "";
-  $("#btn-add").textContent = (phoneAlbum!==null&&name==="photos") ? "‹" : "＋";
+  $("#fab").style.display = (name==="trash"||name==="settings") ? "none" : "";
+  $("#btn-add").style.display = (name==="trash"||name==="settings") ? "none" : "";
+  $("#btn-add").textContent = (phoneAlbum!==null&&name==="photos") ? "?" : "?";
   if(name==="photos" && phoneAlbum===null) exitMulti();
-  $("#title").textContent = name==="albums"?"相册":name==="photos"?(phoneAlbum!==null?"手机相册":"照片"):"设置";
+  $("#title").textContent = name==="albums"?"??":name==="photos"?(phoneAlbum!==null?"????":"??"):name==="trash"?"???":"??";
   if(name==="albums"){ currentAlbum=null; renderAlbums(); }
   if(name==="photos"){ renderPhotos(); }
+  if(name==="trash"){ refreshTrash().then(renderTrash); }
   if(name==="settings"){ renderSettings(); }
 }
 document.querySelectorAll(".tab").forEach(t=>{ t.addEventListener("click", ()=>{ switchView(t.dataset.view); }); });
@@ -501,18 +862,61 @@ $("#selAll").addEventListener("click", ()=>{ visibleMedia().forEach(m=>selection
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
 
-/* ============ 启动 ============ */
-function saveState(){ renderAlbums(); if(currentView==="photos") renderPhotos(); if(currentView==="settings") renderSettings(); }
+/* ============ ???? ============ */
+function cmpVer(a,b){
+  const pa=(a||"").split(".").map(Number), pb=(b||"").split(".").map(Number);
+  for(let i=0;i<3;i++){ const x=pa[i]||0, y=pb[i]||0; if(x!==y) return x-y; }
+  return 0;
+}
+let updateDismissed=null;
+async function checkUpdate(force){
+  try{
+    const r=await fetch(GITHUB_API,{cache:"no-store"});
+    if(!r.ok){ if(force) toast("??????"); return; }
+    const rel=await r.json();
+    const apks=(rel.assets||[]).filter(a=>/PicaPhoto_v\d+\.\d+\.\d+\.apk/i.test(a.name));
+    apks.sort((a,b)=>{ const va=(a.name.match(/v(\d+\.\d+\.\d+)/i)||[])[1], vb=(b.name.match(/v(\d+\.\d+\.\d+)/i)||[])[1]; return cmpVer(vb,va); });
+    const asset=apks[0];
+    if(!asset){ if(force) toast("??????"); return; }
+    const ver=(asset.name.match(/PicaPhoto_v(\d+\.\d+\.\d+)/i)||[])[1];
+    if(!ver){ if(force) toast("??????"); return; }
+    if(cmpVer(ver,APP_VERSION)<=0){ if(force) toast("?????? v"+APP_VERSION); return; }
+    if(updateDismissed===ver) return;
+    updateDismissed=ver;
+    $("#updVer").textContent="v"+ver+"??? v"+APP_VERSION+"?";
+    $("#updLog").textContent=(rel.body||"??????").trim();
+    $("#updateDlg").classList.add("open");
+    window._updUrl=asset.browser_download_url;
+  }catch(e){ if(force) toast("????????????"); }
+}
+$("#updLater").addEventListener("click", ()=>{ $("#updateDlg").classList.remove("open"); });
+$("#updNow").addEventListener("click", ()=>{
+  $("#updateDlg").classList.remove("open");
+  const url=window._updUrl||"";
+  if(!url) return;
+  if(BRIDGE){ BRIDGE.downloadAndInstall(url); toast("????????"); }
+  else { try{ window.open(url,"_blank"); }catch(e){ location.href=url; } }
+});
+
+/* ============ ?? ============ */
+function saveState(){
+  renderAlbums();
+  if(currentView==="photos") renderPhotos();
+  if(currentView==="trash") renderTrash();
+  if(currentView==="settings") renderSettings();
+}
 async function init(){
-  try{ await openDB(); }catch(e){ toast("存储不可用"); }
+  try{ await openDB(); }catch(e){ toast("?????"); }
   media=await storeGet("media");
   albums=await storeGet("albums");
+  await refreshTrash();
   refreshPhoneAlbums();
   applyTheme();
   renderAlbums();
   renderSettings();
   if(!BRIDGE && navigator.serviceWorker){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
-  window.addEventListener("online", ()=>toast("已联网"));
+  window.addEventListener("online", ()=>toast("???"));
+  checkUpdate(false);   // ?????????
 }
 init();
 </script>
