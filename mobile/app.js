@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.8";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.9";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -199,10 +199,15 @@ function refreshPhoneAlbums(force){
 const PHONE_DB_TTL = 30*24*3600*1000;   // IndexedDB 持久缓存 7 天，命中即秒开，后台静默刷新
 function readPhoneMedia(id, cb){
   if(id==="unfiled"){
+    /* unfiled also cached in memory (120s) -> instant re-entry, no native re-query */
+    const cu=phoneMediaCache.get("unfiled");
+    if(cu && Date.now()-cu.t<120000){ cb && cb(cu.items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri))); return; }
     if(!BRIDGE || !BRIDGE.readUnfiledAsync){ cb && cb([]); return; }
     window.__mediaCb = json => {
       let items=[]; try{ items=JSON.parse(json); }catch(e){}
-      cb && cb(items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri)));
+      items = items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri));
+      phoneMediaCache.set("unfiled",{t:Date.now(), items});
+      cb && cb(items);
     };
     BRIDGE.readUnfiledAsync(JSON.stringify([...hiddenAlbums]), "__mediaCb");
     return;
@@ -301,9 +306,9 @@ function createdAlbums(){ try{ return JSON.parse(localStorage.getItem("pp_create
 function addCreated(n){ const a=createdAlbums(); if(!a.includes(n)){ a.push(n); localStorage.setItem("pp_created", JSON.stringify(a)); } }
 function removeCreated(n){ localStorage.setItem("pp_created", JSON.stringify(createdAlbums().filter(x=>x!==n))); }
 function albumTargets(){
-  /* 所有手机相册（含 PicaPhoto 系列与系统相册）+ 用户新建相册 */
+  /* move-target albums: all phone albums EXCEPT hidden ones + created */
   const map=new Map();
-  phoneAlbums.forEach(a=>{ map.set(a.name, a); });
+  phoneAlbums.forEach(a=>{ if(!hiddenAlbums.has(a.id)) map.set(a.name, a); });
   createdAlbums().forEach(n=>{ if(!map.has(n)) map.set(n,{name:n}); });
   return [...map.values()];
 }
@@ -689,6 +694,19 @@ function renderChunk(){
   box.appendChild(frag);
   ensureSentinel(end < items.length);
 }
+let phFillTimer=null;
+const PH_AUTO_FILL_CAP = 3000;
+/* After entering, keep rendering in background until the whole album is filled
+   (thumbs are cached dataURLs -> fast, no scroll-triggered loading) */
+function startAutoFill(){
+  if(phFillTimer) return;
+  const fill=()=>{
+    if(!phItems || phRendered>=phItems.length || phRendered>=PH_AUTO_FILL_CAP){ phFillTimer=null; return; }
+    renderChunk();
+    phFillTimer=setTimeout(fill, 30);
+  };
+  phFillTimer=setTimeout(fill, 150);
+}
 function maybeRenderMore(){
   let guard=0;
   while(guard++<10){
@@ -754,6 +772,7 @@ function renderPhotos(keepScroll){
   phDirty = false;
   phWarmIdx = 0;
   if(phWarmTimer){ clearTimeout(phWarmTimer); phWarmTimer=null; }
+  if(phFillTimer){ clearTimeout(phFillTimer); phFillTimer=null; }
   phEls = new Map();
   phItems = items;
   phRendered = 0;
@@ -775,6 +794,7 @@ function renderPhotos(keepScroll){
   }
   bindPhScroll();
   renderChunk();
+  startAutoFill();
   /* non-keepScroll: start from top (view may have been hidden so reset must happen here) */
   if(!keepScroll && view){ view.scrollTop = 0; }
   /* top up if first screen is not full */
@@ -1754,9 +1774,7 @@ function renderMultiAlbums(){
   box.appendChild(add);
   albumTargets().forEach(a=>{
     const c=document.createElement("button"); c.className="mchip";
-    const hidden = a.id && hiddenAlbums.has(a.id);
-    if(hidden) c.classList.add("hide");
-    c.textContent=(hidden?"\uD83D\uDD12 ":"\uD83D\uDCC1 ")+a.name;
+    c.textContent="\uD83D\uDCC1 "+a.name;
     c.addEventListener("click", ()=>{ moveSelTo(a.name); });
     box.appendChild(c);
   });
