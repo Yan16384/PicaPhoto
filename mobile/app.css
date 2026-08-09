@@ -190,7 +190,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   pointer-events:none;user-select:none;-webkit-user-drag:none}
 #viewer .slide img.full{position:absolute;inset:0;opacity:0;transition:opacity .18s var(--ease)}
 #viewer .slide img.full.show{opacity:1}
-#viewer .slide img.thumb{position:absolute;inset:0;filter:blur(10px) brightness(.85);transform:scale(1.05)}
+#viewer .slide img.thumb{position:absolute;inset:0;filter:blur(4px) brightness(.92);transform:scale(1.03)}
 #viewer video{pointer-events:auto}
 .v-count{position:absolute;top:calc(var(--safe-t) + 10px);left:14px;z-index:6;color:#fff;font-size:13px;font-weight:600;
   background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;animation:fadeIn .3s var(--ease) both}
