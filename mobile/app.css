@@ -52,7 +52,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 30px;display:none;overscroll-behavior-y:contain}
 .view.active{display:block;animation:viewIn .26s var(--ease)}
 /* ============ 首页 ============ */
-.set-h{font-size:12px;color:var(--sub);font-weight:600;padding:8px 4px 4px}
+.set-h{font-size:12px;color:var(--sub);font-weight:600;padding:8px 4px 4px;display:flex;align-items:center;gap:8px}
 .set-h2{font-size:12px;color:var(--sub);font-weight:600;padding:8px 4px 4px;margin:4px 0 0}
 .full{grid-column:1/-1}
 .alb-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
@@ -327,3 +327,9 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .ghost-fly{position:fixed;left:0;right:0;top:0;bottom:0;width:100%;height:100%;object-fit:contain;z-index:999;pointer-events:none;
   transition:transform .18s var(--ease),opacity .18s var(--ease)}
 .ghost-fly.fly{transform:translateY(-170px) scale(.9);opacity:0}
+
+/* 首页：隐藏相册按钮 / 回收站清空小方块 */
+.hide-btn{margin-left:auto;font-size:11px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);padding:3px 10px;border-radius:12px;font-weight:600;flex:none;transition:transform .12s var(--spring)}
+.hide-btn:active{transform:scale(.92)}
+.mini-clear{width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;transition:transform .12s var(--spring)}
+.mini-clear:active{transform:scale(.82)}
