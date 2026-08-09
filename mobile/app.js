@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.9";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.0";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -200,13 +200,13 @@ function readPhoneMedia(id, cb){
     if(!BRIDGE || !BRIDGE.readUnfiledAsync){ cb && cb([]); return; }
     window.__mediaCb = json => {
       let items=[]; try{ items=JSON.parse(json); }catch(e){}
-      cb && cb(items.filter(x=>!trashedUris.has(x.uri)));
+      cb && cb(items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri)));
     };
     BRIDGE.readUnfiledAsync("__mediaCb");
     return;
   }
   const c=phoneMediaCache.get(id);
-  if(c && Date.now()-c.t<PHONE_CACHE_TTL){ cb && cb(c.items.filter(x=>!trashedUris.has(x.uri))); return; }
+  if(c && Date.now()-c.t<PHONE_CACHE_TTL){ cb && cb(c.items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri))); return; }
   const sortItems = arr => (arr||[]).slice().sort((a,b)=>(b.dateAdded||0)-(a.dateAdded||0));
   const finish = items => {
     items = sortItems(items);
@@ -216,7 +216,7 @@ function readPhoneMedia(id, cb){
       for(const [k,v] of phoneMediaCache){ if(!oldest || v.t<oldest.v.t) oldest={k,v}; }
       if(oldest) phoneMediaCache.delete(oldest.k);
     }
-    cb && cb(items.filter(x=>!trashedUris.has(x.uri)));
+    cb && cb(items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri)));
   };
   const refresh = (silent) => {
     if(!BRIDGE || !BRIDGE.readMediaAsync){ if(!silent) finish([]); return; }
@@ -576,6 +576,9 @@ function nativeMove(name, list){
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       const ok=res.filter(r=>r.ok).length, fail=res.length-ok;
       if(ok) recordStats("move", ok);
+      /* 源照片保留（srcKept）的加入待删列表，统一“完成整理” */
+      res.forEach(r=>{ if(r.ok && r.srcKept && r.uri) pendingMoves.add(r.uri); });
+      updateFabDone();
       clearPhoneMediaCache();
       if(fail>0){
         /* 失败项恢复显示 */
@@ -624,6 +627,7 @@ async function removeSelected(){
 
 /* ============ 回收站（App 内软删除：系统文件不动，清空回收站时才真正删除） ============ */
 let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册中过滤
+let pendingMoves = new Set();  // 已复制到目标但源照片待系统确认删除的 uri（“完成整理”统一处理）
 async function refreshTrash(){
   const all = await storeGetAll("trash");
   appTrash = all.filter(t=>!t.fromPhone);
@@ -747,6 +751,11 @@ window.__deleted = async ()=>{
   await storeDelAll("trash", delIds);
   delIds.forEach(id=>{ const t=all.find(x=>x.id===id); if(t) trashedUris.delete(t.uri); });
   if(pendingDelAlbumName){ removeCreated(pendingDelAlbumName); pendingDelAlbumName=null; }
+  /* 已确认删除的源照片从待删列表移除 */
+  if(set.size){
+    pendingMoves = new Set([...pendingMoves].filter(u=>!set.has(u)));
+    updateFabDone();
+  }
   await refreshTrash();
   if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
   toast("已从系统删除 " + set.size + " 项");
@@ -945,8 +954,10 @@ function moveOutCurrent(name){
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       if(res[0]&&res[0].ok){
         recordStats("move",1);
+        if(res[0].srcKept && m.uri) pendingMoves.add(m.uri);
         clearPhoneMediaCache();
         toast("已移出「"+name+"」到 PicaPhoto");
+        updateFabDone();
       } else {
         if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
         if(pi>=0 && phoneMedia.indexOf(m)<0) phoneMedia.splice(pi,0,m);
@@ -988,8 +999,10 @@ async function moveCurrentTo(name){
         let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
         if(res[0]&&res[0].ok){
           recordStats("move",1);
+          if(res[0].srcKept && m.uri) pendingMoves.add(m.uri);
           clearPhoneMediaCache();
           toast("已移入「"+name+"」");
+          updateFabDone();
         } else {
           /* 恢复 */
           if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
@@ -1349,6 +1362,7 @@ function showOrg(){
   if(orgSub==="home"){ renderHome(); }
   if(orgSub==="photos"){ renderPhotos(); }
   if(orgSub==="trash"){ refreshTrash().then(renderTrash); }
+  updateFabDone();
   updateTitle();
   updateTopbar();
 }
@@ -1390,6 +1404,21 @@ $("#btn-add").addEventListener("click", ()=>{
 });
 $("#trashCard").addEventListener("click", openTrashView);
 $("#selDone").addEventListener("click", exitMulti);
+/* “完成整理”：一次性批量确认删除已移动照片的源文件 */
+function updateFabDone(){
+  const n=pendingMoves.size;
+  const b=$("#fabDone");
+  if(!b) return;
+  const show = n>0 && tab==="org" && orgSub==="photos";
+  b.style.display = show ? "flex" : "none";
+  if(show) b.textContent="完成整理 ("+n+")";
+}
+$("#fabDone").addEventListener("click", ()=>{
+  const uris=[...pendingMoves];
+  if(!uris.length) return;
+  requestRealDelete(uris);   // 系统一次性确认，确认后 __deleted 清理
+  toast("正在请求删除 "+uris.length+" 张源照片");
+});
 $("#selAll").addEventListener("click", selectAll);
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
