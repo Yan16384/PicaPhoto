@@ -1,8 +1,8 @@
 "use strict";
-/* ============ PicaPhoto 移动版 v1.2.0 ============ */
+/* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.5";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.6";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -270,6 +270,8 @@ function openPhoneAlbum(id, name){
   phoneAlbum = id; currentAlbum = null; orgSub = "photos";
   exitMulti();
   phoneMedia = [];
+  /* ?????????????????????????????????????? */
+  try{ const v=document.getElementById("view-photos"); if(v) v.scrollTop=0; }catch(e){}
   showOrg();
   /* 有缓存立即显示（秒开）；无缓存显示骨架屏（马上有画面，数据到后填充） */
   const c=phoneMediaCache.get(id);
@@ -491,6 +493,35 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
 
 /* ============ 照片网格（一次性全量渲染 + 月份分隔 + 滚动位置保持） ============ */
 let phEls = new Map();
+let phRendered = 0;
+let phObserver = null;
+const PH_CHUNK = 72;
+let lastMonthShown = null;
+let flushTimer = null;
+/* Thumbnail -> base64 persistent cache (instant re-entry, no content:// IO) */
+function thumbToB64(m, img){
+  if(!m || m._b64 || !m.thumb || m.thumb.indexOf("content:")!==0) return;
+  m._b64 = true;
+  try{
+    const c=document.createElement("canvas");
+    c.width=160; c.height=160;
+    const ctx=c.getContext("2d");
+    ctx.drawImage(img,0,0,160,160);
+    const url=c.toDataURL("image/jpeg",0.72);
+    if(url && url.length>200){ m.thumb=url; scheduleCacheFlush(); }
+  }catch(e){}
+}
+function scheduleCacheFlush(){
+  clearTimeout(flushTimer);
+  flushTimer=setTimeout(()=>{
+    try{
+      if(phoneAlbum && phoneAlbum!=="unfiled" && phoneMedia.length && db){
+        db.transaction("phonecache","readwrite").objectStore("phonecache").put({albumId:phoneAlbum, items:phoneMedia, t:Date.now()});
+        const c=phoneMediaCache.get(phoneAlbum); if(c) c.items=phoneMedia;
+      }
+    }catch(e){}
+  },900);
+}
 function applyGridCols(animate){
   const box=$("#photos");
   if(!box || box.className!=="ph-grid") return;
@@ -521,29 +552,43 @@ function monthLabelOf(m){
   return d.getFullYear()+"年"+(d.getMonth()+1)+"月";
 }
 const VP_PLACEHOLDER = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#262a33"/><circle cx="120" cy="120" r="42" fill="rgba(255,255,255,.14)"/><path d="M104 96v48l40-24z" fill="#fff"/></svg>');
-function imgSrcOf(m){ return isVideo(m) ? (m.thumb||VP_PLACEHOLDER) : (m.thumb||m.uri||objURL(m)); }
-/* 视频真实缩略图：可见时后台取帧，替换占位并缓存到 m.thumb */
+function imgSrcOf(m){ return isVideo(m) ? ((m.thumb && m.thumb.indexOf("data:")===0) ? m.thumb : VP_PLACEHOLDER) : (m.thumb||m.uri||objURL(m)); }
+/* Video real frame: lazily generated when visible (concurrency capped), persisted as dataURL */
 let vtPending = new Map();
 let vtObserver = null;
+let vtQueue = [];
+let vtActive = 0;
+const VT_MAX_CONCURRENT = 2;
 window.__vtCb = obj => {
+  vtActive = Math.max(0, vtActive-1);
   try{
     const r=JSON.parse(obj);
     if(r && r.uri){
       const entry=vtPending.get(r.uri);
       if(entry){
-        if(r.thumb && r.thumb!=="null"){ entry.m.thumb=r.thumb; entry.img.src=r.thumb; }
+        if(r.thumb && r.thumb!=="null" && r.thumb.indexOf("data:")===0){ entry.m.thumb=r.thumb; entry.img.src=r.thumb; scheduleCacheFlush(); }
         vtPending.delete(r.uri);
       }
     }
   }catch(e){}
+  drainVtQueue();
 };
+function drainVtQueue(){
+  while(vtActive < VT_MAX_CONCURRENT && vtQueue.length){
+    const job=vtQueue.shift();
+    vtActive++;
+    try{ BRIDGE.getVideoThumbAsync(job.uri, "__vtCb"); }
+    catch(e){ vtActive=Math.max(0,vtActive-1); vtPending.delete(job.uri); }
+  }
+}
 function ensureVideoThumb(m, el){
   if(!m || !m.uri || !BRIDGE || !BRIDGE.getVideoThumbAsync) return;
-  if(m.thumb || vtPending.has(m.uri)) return;
+  if((m.thumb && m.thumb.indexOf("data:")===0) || vtPending.has(m.uri)) return;
   const img=el ? el.querySelector("img") : null;
   if(!img) return;
   vtPending.set(m.uri, {m, img});
-  try{ BRIDGE.getVideoThumbAsync(m.uri, "__vtCb"); }catch(e){ vtPending.delete(m.uri); }
+  vtQueue.push({uri:m.uri});
+  drainVtQueue();
 }
 function setupVtObserver(){
   if(vtObserver) return;
@@ -567,7 +612,9 @@ function buildPhotoEl(m, idx){
   el.innerHTML = '<img loading="lazy" decoding="async" src="'+imgSrcOf(m)+'" alt=""><span class="idx"></span>'+(isVideo(m)?'<span class="dur">▶</span>':'');
   /* 加载失败的占位（系统已删除的照片等）立即移除，不残留损坏占位 */
   const im=el.querySelector("img");
+  im.onload=()=>{ thumbToB64(m, im); };
   im.onerror=()=>{
+    if(isVideo(m)){ im.src=VP_PLACEHOLDER; return; }
     const mi=visibleMedia().findIndex(x=>itemKey(x)===key);
     if(mi>=0){ const mm=visibleMedia()[mi]; if(phoneAlbum!==null && phoneMedia.indexOf(mm)>=0) phoneMedia.splice(phoneMedia.indexOf(mm),1); }
     el.classList.add("flyout-up");
@@ -577,7 +624,7 @@ function buildPhotoEl(m, idx){
   if(multi) el.classList.add("multi");
   if(idx < 60){ el.classList.add("anim-pop"); el.style.animationDelay = (idx*20)+"ms"; }
   /* 视频且无缩略图：注册懒加载（可见时取真实帧） */
-  if(isVideo(m) && !m.thumb && BRIDGE && BRIDGE.getVideoThumbAsync){
+  if(isVideo(m) && (!m.thumb || m.thumb.indexOf("data:")!==0) && BRIDGE && BRIDGE.getVideoThumbAsync){
     setupVtObserver();
     vtObserver.observe(el);
   }
@@ -585,13 +632,82 @@ function buildPhotoEl(m, idx){
   return el;
 }
 function itemsIndexOf(m){ return visibleMedia().indexOf(m); }
-/* 一次性渲染全部照片（含月份分隔占位格），不再随滚动分块加载 */
+/* Virtualized chunked rendering: only render near the viewport (72/chunk),
+   scroll to the sentinel renders the next chunk; thumbnails persist as dataURL
+   so re-entering an album is instant (no content:// requests). */
+let phItems = [];
+let phScrollBound = false;
+function bindPhScroll(){
+  if(phScrollBound) return;
+  phScrollBound = true;
+  const view=document.getElementById("view-photos");
+  if(!view) return;
+  view.addEventListener("scroll", maybeRenderMore, {passive:true});
+}
+function ensureSentinel(show){
+  const box=$("#photos");
+  let sentinel=document.getElementById("phMore");
+  if(show){
+    if(!sentinel){ sentinel=document.createElement("div"); sentinel.id="phMore"; sentinel.className="ph-more"; box.appendChild(sentinel); }
+    else box.appendChild(sentinel);
+  } else if(sentinel){ sentinel.remove(); }
+}
+function renderChunk(){
+  const items=phItems;
+  const box=$("#photos");
+  if(!box || !items) return;
+  const end=Math.min(phRendered+PH_CHUNK, items.length);
+  if(phRendered>=end){ ensureSentinel(false); return; }
+  const frag=document.createDocumentFragment();
+  for(let i=phRendered;i<end;i++){
+    const m=items[i];
+    const ml=monthLabelOf(m);
+    if(ml && ml!==lastMonthShown){
+      const sep=document.createElement("div");
+      sep.className="ph ph-month";
+      sep.textContent=ml;
+      frag.appendChild(sep);
+      lastMonthShown=ml;
+    }
+    frag.appendChild(buildPhotoEl(m, i));
+  }
+  phRendered=end;
+  box.appendChild(frag);
+  ensureSentinel(end < items.length);
+}
+function maybeRenderMore(){
+  let guard=0;
+  while(guard++<10){
+    const sentinel=document.getElementById("phMore");
+    if(!sentinel) return;
+    const view=document.getElementById("view-photos");
+    const vr=view?view.getBoundingClientRect():{top:0,bottom:window.innerHeight};
+    const sr=sentinel.getBoundingClientRect();
+    if(sr.top > vr.bottom + 320) return;
+    renderChunk();
+    if(phRendered>=phItems.length) return;
+  }
+}
+function renderMoreTo(px){
+  const view=document.getElementById("view-photos");
+  const col=Math.max(2, gridCols||4);
+  const cell=view?Math.max(64, Math.round(view.clientWidth/col)):100;
+  const target=px+(view?view.clientHeight:600)+cell*3;
+  let guard=0;
+  while(phRendered<phItems.length && guard++<60){
+    if((phRendered/col)*cell>=target) break;
+    renderChunk();
+  }
+}
 function renderPhotos(keepScroll){
   const box = $("#photos");
   const items = visibleMedia();
-  const view=$("#view-photos");
+  const view=document.getElementById("view-photos");
   const prevTop = keepScroll ? (view ? view.scrollTop : 0) : 0;
   phEls = new Map();
+  phItems = items;
+  phRendered = 0;
+  lastMonthShown = null;
   if(!items.length){
     box.className="";
     box.innerHTML = '<div class="empty"><div class="big">📷</div>还没有照片<br><span style="font-size:13px">点击上方相册进入</span></div>';
@@ -600,29 +716,23 @@ function renderPhotos(keepScroll){
   box.className = "ph-grid";
   box.innerHTML = "";
   applyGridCols();
-  /* 未整理视图顶部：已整理 X / 总数 Y */
+  /* unfiled top: processed X / total Y */
   if(phoneAlbum==="unfiled" && unfiledTotal>0){
     const prog=document.createElement("div");
     prog.className="unfiled-progress full";
     prog.innerHTML='📊 已整理 <b>'+(unfiledTotal-items.length)+'</b> / '+unfiledTotal;
     box.appendChild(prog);
   }
-  const frag=document.createDocumentFragment();
-  let lastMonth=null, idx=0;
-  items.forEach(m=>{
-    const ml=monthLabelOf(m);
-    if(ml && ml!==lastMonth){
-      const sep=document.createElement("div");
-      sep.className="ph ph-month";
-      sep.textContent=ml;
-      frag.appendChild(sep);
-      lastMonth=ml;
-    }
-    frag.appendChild(buildPhotoEl(m, idx));
-    idx++;
-  });
-  box.appendChild(frag);
-  if(keepScroll && prevTop>0 && view){ requestAnimationFrame(()=>{ view.scrollTop = prevTop; }); }
+  bindPhScroll();
+  renderChunk();
+  /* non-keepScroll: start from top (view may have been hidden so reset must happen here) */
+  if(!keepScroll && view){ view.scrollTop = 0; }
+  /* top up if first screen is not full */
+  setTimeout(()=>{ maybeRenderMore(); }, 30);
+  if(keepScroll && prevTop>0 && view){
+    renderMoreTo(prevTop);
+    requestAnimationFrame(()=>{ view.scrollTop = prevTop; });
+  }
 }
 function refreshBadges(){
   let i=1;
