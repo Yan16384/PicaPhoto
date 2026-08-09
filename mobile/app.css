@@ -328,7 +328,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #viewer[data-vwork="left"] .slide{justify-content:flex-end}
 #viewer[data-vwork="right"] .slide{justify-content:flex-start}
 /* 下部：一行放不下自动两行，两行仍放不下横向滑动 */
-#viewer[data-vwork="bottom"] .vw-albums{flex-wrap:wrap;max-height:76px;overflow-y:hidden;overflow-x:auto}
+#viewer[data-vwork="bottom"] .vw-albums{flex-wrap:wrap;max-height:132px;overflow-y:hidden;overflow-x:auto}
 /* 上滑删除：当前照片飞走层 */
 .ghost-fly{position:fixed;left:0;right:0;top:0;bottom:0;width:100%;height:100%;object-fit:contain;z-index:999;pointer-events:none;
   transition:transform .18s var(--ease),opacity .18s var(--ease)}
