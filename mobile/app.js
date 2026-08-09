@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.8";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.9";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -207,7 +207,9 @@ function readPhoneMedia(id, cb){
   }
   const c=phoneMediaCache.get(id);
   if(c && Date.now()-c.t<PHONE_CACHE_TTL){ cb && cb(c.items.filter(x=>!trashedUris.has(x.uri))); return; }
+  const sortItems = arr => (arr||[]).slice().sort((a,b)=>(b.dateAdded||0)-(a.dateAdded||0));
   const finish = items => {
+    items = sortItems(items);
     phoneMediaCache.set(id,{t:Date.now(), items});
     if(phoneMediaCache.size>PHONE_CACHE_MAX){
       let oldest=null;
@@ -221,6 +223,7 @@ function readPhoneMedia(id, cb){
     window.__mediaCb = json => {
       let items=[];
       try{ items=JSON.parse(json); }catch(e){}
+      items = sortItems(items);
       phoneMediaCache.set(id,{t:Date.now(), items});
       try{
         const t=db.transaction("phonecache","readwrite").objectStore("phonecache").put({albumId:id, items, t:Date.now()});
@@ -402,7 +405,9 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     const ph=el && el.closest ? el.closest(".ph") : null;
     if(ph && ph.dataset.key && ph.dataset.key!==gLastKey){
       gLastKey=ph.dataset.key;
-      if(!selection.has(gLastKey)){ selection.add(gLastKey); ph.classList.add("sel-on"); refreshBadges(); }
+      if(selection.has(gLastKey)){ selection.delete(gLastKey); ph.classList.remove("sel-on"); }
+      else { selection.add(gLastKey); ph.classList.add("sel-on"); }
+      refreshBadges();
     }
   },{passive:false});
   v.addEventListener("touchend", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
@@ -432,13 +437,15 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
   v.addEventListener("touchcancel", ()=>{ pinch0=0; },{passive:true});
 })();
 
-/* ============ 照片网格（懒加载分块渲染 + 滚动位置保持） ============ */
+/* ============ 照片网格（一次性全量渲染 + 月份分隔 + 滚动位置保持） ============ */
 let phEls = new Map();
-let phRendered = 0;
-let phObserver = null;
-const PH_CHUNK = 60;
 function applyGridCols(){ const box=$("#photos"); if(box && box.className==="ph-grid") box.style.gridTemplateColumns="repeat("+gridCols+",1fr)"; }
-function buildPhotoEl(m){
+function monthLabelOf(m){
+  const d = m && m.dateAdded ? new Date(m.dateAdded*1000) : null;
+  if(!d || isNaN(d.getTime())) return null;
+  return d.getFullYear()+"年"+(d.getMonth()+1)+"月";
+}
+function buildPhotoEl(m, idx){
   const key = itemKey(m);
   const el = document.createElement("div");
   el.className = "ph";
@@ -446,43 +453,18 @@ function buildPhotoEl(m){
   el.innerHTML = '<img loading="lazy" decoding="async" src="'+(m.thumb||m.uri||objURL(m))+'" alt=""><span class="idx"></span>'+(isVideo(m)?'<span class="dur">▶</span>':'');
   if(multi && selection.has(key)){ el.classList.add("sel-on"); el.querySelector(".idx").textContent = [...selection].indexOf(key)+1; }
   if(multi) el.classList.add("multi");
-  /* 入场动画：仅首批 60 项依次浮现；滚动加载的项立即显示（避免延迟白屏） */
-  if(phRendered < PH_CHUNK){
-    el.classList.add("anim-pop");
-    el.style.animationDelay = (phRendered*25)+"ms";
-  }
+  if(idx < 60){ el.classList.add("anim-pop"); el.style.animationDelay = (idx*20)+"ms"; }
   phEls.set(key, el);
   return el;
 }
 function itemsIndexOf(m){ return visibleMedia().indexOf(m); }
-function renderChunk(items){
-  const box = $("#photos");
-  const end = Math.min(items.length, phRendered + PH_CHUNK);
-  for(; phRendered < end; phRendered++){
-    box.appendChild(buildPhotoEl(items[phRendered]));
-  }
-  let sent = document.getElementById("phMore");
-  if(phRendered < items.length){
-    if(!sent){ sent=document.createElement("div"); sent.id="phMore"; sent.style.height="1px"; box.appendChild(sent); }
-    if(!phObserver){
-      phObserver = new IntersectionObserver(entries=>{
-        if(entries.some(e=>e.isIntersecting)) renderChunk(visibleMedia());
-      }, {root:document.getElementById("view-photos")||null, rootMargin:"300px"});
-    }
-    phObserver.observe(sent);
-  } else {
-    if(sent) sent.remove();
-    if(phObserver){ phObserver.disconnect(); phObserver=null; }
-  }
-}
+/* 一次性渲染全部照片（含月份分隔占位格），不再随滚动分块加载 */
 function renderPhotos(keepScroll){
   const box = $("#photos");
   const items = visibleMedia();
   const view=$("#view-photos");
   const prevTop = keepScroll ? (view ? view.scrollTop : 0) : 0;
   phEls = new Map();
-  if(phObserver){ phObserver.disconnect(); phObserver=null; }
-  phRendered = 0;
   if(!items.length){
     box.className="";
     box.innerHTML = '<div class="empty"><div class="big">📷</div>还没有照片<br><span style="font-size:13px">点击上方相册进入</span></div>';
@@ -491,7 +473,21 @@ function renderPhotos(keepScroll){
   box.className = "ph-grid";
   box.innerHTML = "";
   applyGridCols();
-  renderChunk(items);
+  const frag=document.createDocumentFragment();
+  let lastMonth=null, idx=0;
+  items.forEach(m=>{
+    const ml=monthLabelOf(m);
+    if(ml && ml!==lastMonth){
+      const sep=document.createElement("div");
+      sep.className="ph ph-month";
+      sep.textContent=ml;
+      frag.appendChild(sep);
+      lastMonth=ml;
+    }
+    frag.appendChild(buildPhotoEl(m, idx));
+    idx++;
+  });
+  box.appendChild(frag);
   if(keepScroll && prevTop>0 && view){ requestAnimationFrame(()=>{ view.scrollTop = prevTop; }); }
 }
 function refreshBadges(){
@@ -640,55 +636,36 @@ async function refreshTrash(){
   const d=$("#trashCardD");
   if(d) d.textContent = trashList.length ? ("共 "+trashList.length+" 项 · 上滑照片即可回收") : "上滑照片即可回收，误删可找回";
 }
-let trashRendered = 0, trashObserver = null;
 function renderTrash(){
   const box=$("#trash");
   const view=$("#view-trash");
   const prevTop = view ? view.scrollTop : 0;
   box.className="ph-grid";
   box.innerHTML="";
-  trashRendered = 0;
-  if(trashObserver){ trashObserver.disconnect(); trashObserver=null; }
   if(!trashList.length){
     box.innerHTML='<div class="empty full"><div class="big">🗑️</div>回收站是空的<br><span style="font-size:13px">查看照片时上滑即可移入回收站</span></div>';
     return;
   }
-  renderTrashChunk();
+  const frag=document.createDocumentFragment();
+  trashList.forEach((m,i)=>{
+    frag.appendChild(trashEl(m, i));
+  });
+  box.appendChild(frag);
+  const actions=document.createElement("div");
+  actions.className="trash-actions full";
+  actions.innerHTML='<button class="big-btn ghost" id="btnRestoreAll">↩️ 全部恢复</button><button class="big-btn danger" id="btnEmpty">清空回收站</button>';
+  box.appendChild(actions);
+  $("#btnRestoreAll").addEventListener("click", restoreAllTrash);
+  $("#btnEmpty").addEventListener("click", emptyTrash);
   if(view && prevTop>0) requestAnimationFrame(()=>{ view.scrollTop = prevTop; });
 }
-function trashEl(m){
+function trashEl(m, i){
   const el=document.createElement("div"); el.className="ph";
   el.innerHTML='<img loading="lazy" decoding="async" src="'+(m.thumb||m.uri||objURL(m))+'" alt="">'+(m.isVideo?'<span class="dur">▶</span>':'');
-  if(trashRendered < PH_CHUNK){ el.classList.add("anim-pop"); el.style.animationDelay=(trashRendered*25)+"ms"; }
+  if(i < 60){ el.classList.add("anim-pop"); el.style.animationDelay=(i*20)+"ms"; }
   el.addEventListener("click", ()=>{ openViewer(trashList, trashList.indexOf(m), "trash"); });
   bindLong(el, ()=>sheetTrashItem(m));
   return el;
-}
-function renderTrashChunk(){
-  const box=$("#trash");
-  const end = Math.min(trashList.length, trashRendered + 60);
-  for(; trashRendered < end; trashRendered++){ box.appendChild(trashEl(trashList[trashRendered])); }
-  let sent = document.getElementById("trMore");
-  if(trashRendered < trashList.length){
-    if(!sent){ sent=document.createElement("div"); sent.id="trMore"; sent.style.height="1px"; box.appendChild(sent); }
-    if(!trashObserver){
-      trashObserver = new IntersectionObserver(entries=>{
-        if(entries.some(e=>e.isIntersecting)) renderTrashChunk();
-      }, {root:document.getElementById("view-trash")||null, rootMargin:"300px"});
-    }
-    trashObserver.observe(sent);
-  } else {
-    if(sent) sent.remove();
-    if(trashObserver){ trashObserver.disconnect(); trashObserver=null; }
-  }
-  if(trashRendered >= trashList.length){
-    const actions=document.createElement("div");
-    actions.className="trash-actions full";
-    actions.innerHTML='<button class="big-btn ghost" id="btnRestoreAll">↩️ 全部恢复</button><button class="big-btn danger" id="btnEmpty">清空回收站</button>';
-    box.appendChild(actions);
-    $("#btnRestoreAll").addEventListener("click", restoreAllTrash);
-    $("#btnEmpty").addEventListener("click", emptyTrash);
-  }
 }
 function sheetTrashItem(m){
   sheet([{ic:"↩️",t:"恢复",f:()=>restoreFromTrash(m)},
