@@ -20,3 +20,5 @@
 - 状态栏/导航栏自动按主题变色，内容延伸至挖孔区（CSS safe-area 避让）
 - 动画仅用 transform/opacity（GPU 合成），120Hz 流畅；图片走系统缩略图 + 分块渲染 + 预加载
 - 版本 v1.3.8（versionCode 34）
+
+<!-- retry pages build -->
