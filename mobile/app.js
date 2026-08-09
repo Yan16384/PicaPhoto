@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.6";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.7";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -166,15 +166,29 @@ function fmtBytes(n){
 let phoneMediaCache = new Map();
 const PHONE_CACHE_TTL = 300000;      // 5 分钟
 const PHONE_CACHE_MAX = 12;          // 最多缓存 12 个相册，防内存膨胀
+function adjustAlbumCounts(){
+  /* 相册计数 = 系统原始数 - 已在回收站（App 内软删除）的照片数；基于 rawCount 不重复减 */
+  try{
+    const recycled={};
+    phoneTrash.forEach(t=>{ if(t.albumId) recycled[t.albumId]=(recycled[t.albumId]||0)+1; });
+    phoneAlbums.forEach(a=>{
+      const raw = (a.rawCount != null ? a.rawCount : a.count) || 0;
+      a.rawCount = raw;
+      a.count = recycled[a.id] ? Math.max(0, raw-recycled[a.id]) : raw;
+    });
+  }catch(e){}
+}
 function refreshPhoneAlbums(force){
   if(!BRIDGE) return;
   try{
     if(!force){
       const c=localStorage.getItem("pp_albums_cache");
-      if(c){ const o=JSON.parse(c); if(o && o.albums && Date.now()-o.t<PHONE_CACHE_TTL && BRIDGE.hasPermission()){ phoneAlbums=o.albums; return; } }
+      if(c){ const o=JSON.parse(c); if(o && o.albums && Date.now()-o.t<PHONE_CACHE_TTL && BRIDGE.hasPermission()){ phoneAlbums=o.albums; adjustAlbumCounts(); return; } }
     }
     if(!BRIDGE.hasPermission()){ phoneAlbums=[]; return; }
     phoneAlbums=JSON.parse(BRIDGE.readAlbums());
+    phoneAlbums.forEach(a=>{ a.rawCount = a.count; });
+    adjustAlbumCounts();
     try{ localStorage.setItem("pp_albums_cache", JSON.stringify({t:Date.now(), albums:phoneAlbums})); }catch(e){}
     const ids=new Set(phoneAlbums.map(a=>a.id));
     for(const key of [...phoneMediaCache.keys()]){ if(!ids.has(key)) phoneMediaCache.delete(key); }
@@ -372,7 +386,7 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
   const v=$("#view-photos");
   let gsx=null, gsy=null, gActive=false, gMode=null, gLastKey=null;
   v.addEventListener("touchstart", e=>{
-    if(e.touches.length!==1) return;
+    if(e.touches.length!==1){ gActive=false; gsx=null; gMode=null; return; }
     gsx=e.touches[0].clientX; gsy=e.touches[0].clientY; gActive=true; gMode=null; gLastKey=null;
   },{passive:true});
   v.addEventListener("touchmove", e=>{
@@ -393,6 +407,29 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
   },{passive:false});
   v.addEventListener("touchend", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
   v.addEventListener("touchcancel", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
+})();
+/* 小图网格：双指捏合调整排列（张开=变大最多横排2，合拢=变小最少横排6） */
+(function(){
+  const v=$("#view-photos");
+  let pinch0=0, cols0=gridCols;
+  v.addEventListener("touchstart", e=>{
+    if(e.touches.length===2){ pinch0=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); cols0=gridCols; }
+  },{passive:true});
+  v.addEventListener("touchmove", e=>{
+    if(e.touches.length<2 || pinch0<=0) return;
+    e.preventDefault();   // 阻止 WebView 默认双指缩放
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    let nc = cols0 - Math.round((d-pinch0)/70);
+    nc = Math.max(2, Math.min(6, nc));
+    if(nc!==gridCols){
+      gridCols=nc;
+      try{ localStorage.setItem("pp_grid_cols", String(gridCols)); }catch(e){}
+      applyGridCols();
+      vibrate(8);
+    }
+  },{passive:false});
+  v.addEventListener("touchend", ()=>{ pinch0=0; },{passive:true});
+  v.addEventListener("touchcancel", ()=>{ pinch0=0; },{passive:true});
 })();
 
 /* ============ 照片网格（懒加载分块渲染 + 滚动位置保持） ============ */
@@ -564,17 +601,27 @@ function nativeMove(name, list){
 async function removeSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
-  /* 移入回收站无需确认（可恢复，系统文件不删除） */
+  /* 移入回收站无需确认（可恢复，系统文件不删除）；删除后立即从网格移除，立马生效 */
   if(phoneAlbum!==null){
-    for(const m of list){ await trashPhone(m); }
+    for(const m of list){
+      await trashPhone(m);
+      const el=phEls.get(itemKey(m)); if(el){ el.remove(); phEls.delete(itemKey(m)); }
+    }
     exitMulti();
     await refreshTrash();
+    refreshPhoneAlbums();
     toast("已移入回收站 "+list.length+" 项");
     return;
   }
   const ids = [...selection].filter(k => k && !k.startsWith("content:"));
   if(!ids.length) return;
-  for(const k of ids){ const m = media.find(x=>x.id===k); if(m){ await trashOne(m); } }
+  for(const k of ids){
+    const m = media.find(x=>x.id===k);
+    if(m){
+      await trashOne(m);
+      const el=phEls.get(k); if(el){ el.remove(); phEls.delete(k); }
+    }
+  }
   exitMulti();
   saveState();
 }
@@ -649,7 +696,7 @@ function sheetTrashItem(m){
 }
 /* 手机照片移入回收站：只做 App 内标记，系统文件不动 */
 async function trashPhone(m){
-  const rec={id:"p_"+m.uri, uri:m.uri, name:m.name, mime:m.mime||m.type||"", isVideo:!!((m.mime||m.type)||"").startsWith("video/"), trashedAt:Date.now(), fromPhone:true};
+  const rec={id:"p_"+m.uri, uri:m.uri, name:m.name, mime:m.mime||m.type||"", isVideo:!!((m.mime||m.type)||"").startsWith("video/"), trashedAt:Date.now(), fromPhone:true, albumId:m.albumId||null};
   await storePut("trash", rec);
   trashedUris.add(m.uri);
   const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
