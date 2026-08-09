@@ -263,7 +263,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #updateDlg .log{font-size:13px;color:var(--sub);line-height:1.6;max-height:40vh;overflow-y:auto;background:var(--bg);border-radius:10px;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
 /* ============ 多选底部相册 ============ */
 #multiAlbums{position:fixed;left:0;right:0;bottom:calc(var(--safe-b) + 66px);z-index:79;display:none;gap:8px;
-  overflow-x:auto;padding:8px 12px;background:color-mix(in srgb,var(--card) 94%,transparent);
+  flex-wrap:wrap;align-content:flex-start;max-height:104px;overflow-x:hidden;overflow-y:auto;
+  padding:8px 12px;background:color-mix(in srgb,var(--card) 94%,transparent);
   backdrop-filter:blur(14px);border-top:1px solid var(--line);-webkit-overflow-scrolling:touch;scrollbar-width:none}
 #multiAlbums.show{display:flex;animation:riseIn .22s var(--ease)}
 #multiAlbums::-webkit-scrollbar{display:none}
@@ -271,6 +272,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring)}
 #multiAlbums .mchip:active{transform:scale(.9)}
 #multiAlbums .mchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
+#multiAlbums .mchip.hide{background:color-mix(in srgb,var(--fg) 18%,transparent);color:var(--fg)}
 /* ============ Toast ============ */
 #toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 26px);transform:translateX(-50%) translateY(10px);
   background:rgba(0,0,0,.82);color:#fff;padding:10px 16px;border-radius:22px;font-size:14px;z-index:200;
