@@ -214,6 +214,17 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   transition:transform .2s cubic-bezier(.2,.8,.2,1)}
 .switch.on::after{transform:translateX(20px)}
 
+/* ============ 多选底部相册快捷移动 ============ */
+#multiAlbums{position:fixed;left:0;right:0;bottom:calc(var(--safe-b) + 66px);z-index:79;display:none;gap:8px;
+  overflow-x:auto;padding:8px 12px;background:color-mix(in srgb,var(--card) 94%,transparent);
+  backdrop-filter:blur(14px);border-top:1px solid var(--line);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#multiAlbums.show{display:flex}
+#multiAlbums::-webkit-scrollbar{display:none}
+#multiAlbums .mchip{flex:none;height:36px;padding:0 16px;border-radius:18px;background:var(--accent);color:#fff;
+  font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .12s}
+#multiAlbums .mchip:active{transform:scale(.94)}
+#multiAlbums .mchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
+
 /* ============ Toast ============ */
 #toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 26px);transform:translateX(-50%) translateY(10px);
   background:rgba(0,0,0,.82);color:#fff;padding:10px 16px;border-radius:22px;font-size:14px;z-index:200;
@@ -232,6 +243,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 <header id="topbar">
   <img class="logo" src="icon-192.png" alt="">
   <h1 id="title">整理</h1>
+  <button class="tb-btn" id="btn-multi" aria-label="选择" style="display:none">选择</button>
   <button class="tb-btn" id="btn-add" aria-label="添加">＋</button>
 </header>
 
@@ -269,6 +281,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   <div class="v-bottom hidden" id="vBottom"></div>
 </div>
 
+<div id="multiAlbums"></div>
 <div id="selbar">
   <span class="count" id="selCount">0 项</span>
   <button class="sbtn" id="selAll">全选</button>
@@ -306,7 +319,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 "use strict";
 /* ============ 原生桥接 ============ */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = "1.0.5";
+const APP_VERSION = "1.0.6";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;      // 当前浏览的手机相册 id
@@ -441,11 +454,13 @@ function refreshPhoneAlbums(force){
 }
 function readPhoneMedia(id){
   const c=phoneMediaCache.get(id);
-  if(c && Date.now()-c.t<300000) return c.items;
-  let items=[];
-  try{ items=JSON.parse(BRIDGE.readMedia(id)); }catch(e){ items=[]; }
-  phoneMediaCache.set(id,{t:Date.now(), items});
-  return items;
+  let items;
+  if(c && Date.now()-c.t<300000){ items=c.items; }
+  else {
+    try{ items=JSON.parse(BRIDGE.readMedia(id)); }catch(e){ items=[]; }
+    phoneMediaCache.set(id,{t:Date.now(), items});
+  }
+  return items.filter(x=>!trashedUris.has(x.uri));
 }
 function requestPhonePermission(){
   if(!BRIDGE) return;
@@ -534,9 +549,8 @@ async function confirmDeleteAlbum(a){
   const items=media.filter(m=>m.album===a.id);
   const del=confirm(`删除相册「${a.name}」？\n是否同时删除相册内的 ${items.length} 张照片？\n（点"取消"则保留照片，照片移回全部照片）`);
   if(del){
-    for(const m of items){ if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); } await storeDel("media", m.id); }
-    media=media.filter(m=>m.album!==a.id);
-    toast("已删除相册及 "+items.length+" 张照片");
+    for(const m of items){ await trashOne(m); }
+    toast("已删除相册，"+items.length+" 张照片已移入回收站");
   } else {
     media.forEach(m=>{ if(m.album===a.id) m.album=null; });
     media.forEach(m=>storePut("media",m));
@@ -552,14 +566,20 @@ function phoneAlbumMenu(a){
           {ic:"⟳",t:"刷新列表",f:()=>{ refreshPhoneAlbums(true); renderHome(); toast("已刷新"); }}],"管理手机相册");
 }
 function confirmDeletePhoneAlbum(a){
-  if(!confirm(`删除手机相册「${a.name}」？\n是否同时删除相册内的 ${a.count} 张照片？\n此操作不可恢复！`)) return;
-  try{
-    const n = String(BRIDGE.deleteAlbum(a.id));
+  if(!confirm(`删除手机相册「${a.name}」？\n相册内的 ${a.count} 张照片将移入回收站（可恢复，系统文件不删除）。\n确定？`)) return;
+  let items=[];
+  try{ items=JSON.parse(BRIDGE.readMedia(a.id)); }catch(e){ items=[]; }
+  (async ()=>{
+    let n=0;
+    for(const it of items){
+      if(it && it.uri && !trashedUris.has(it.uri)){ await trashPhone(it); n++; }
+    }
     phoneMediaCache.delete(a.id);
     refreshPhoneAlbums(true);
-    toast("已删除相册及 "+n+" 张照片");
-  }catch(e){ toast("删除失败："+e); }
-  renderHome();
+    await refreshTrash();
+    toast("已将 "+n+" 张照片移入回收站");
+    renderHome();
+  })();
 }
 function openPhotosView(albumId){ currentAlbum=albumId; orgSub="photos"; exitMulti(); showOrg(); }
 function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum===null?media:media.filter(m=>m.album===currentAlbum)); }
@@ -597,14 +617,19 @@ function toggleSel(key, el){
 function enterMulti(){
   multi = true; selection = new Set(); renderPhotos();
   $("#selbar").classList.add("show");
-  $("#selDel").style.display = phoneAlbum!==null ? "none" : "";
+  $("#selDel").style.display = "";
+  if(phoneAlbum!==null) renderMultiAlbums();
+  $("#btn-multi").textContent = "取消";
   $("#title").textContent = "选择照片";
 }
 function exitMulti(){
   multi = false; selection = new Set();
   $("#selbar").classList.remove("show");
+  $("#multiAlbums").classList.remove("show");
+  $("#multiAlbums").innerHTML = "";
   renderPhotos();
   if(orgSub==="photos") updateTitle();
+  const bm=$("#btn-multi"); if(bm) bm.textContent = "选择";
 }
 function updateSelbar(){ $("#selCount").textContent = selection.size + " 项"; }
 function updateTitle(){
@@ -639,7 +664,15 @@ function nativeMove(name, list){
   exitPhoneMode();
 }
 async function removeSelected(){
-  if(phoneAlbum!==null) return;
+  const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
+  if(!list.length) return;
+  if(phoneAlbum!==null){
+    if(!confirm("将选中的 "+list.length+" 张照片移入回收站？（可恢复，系统文件不删除）")) return;
+    for(const m of list){ await trashPhone(m); }
+    exitMulti();
+    await refreshTrash();
+    return;
+  }
   const ids = [...selection].filter(k => k && !k.startsWith("content:"));
   if(!ids.length) return;
   if(!confirm("从 PicaPhoto 中删除选中的 "+ids.length+" 项？（可稍后在回收站找回）")) return;
@@ -647,16 +680,17 @@ async function removeSelected(){
   exitMulti();
   saveState();
 }
-/* ============ 回收站 ============ */
+/* ============ 回收站（App 内软删除：系统文件不动，清空回收站时才真正删除） ============ */
+let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册中过滤
 async function refreshTrash(){
-  appTrash = await storeGet("trash");
-  if(BRIDGE && BRIDGE.hasPermission()){
-    try{ phoneTrash = JSON.parse(BRIDGE.readTrash()); }catch(e){ phoneTrash=[]; }
-  } else phoneTrash = [];
+  const all = await storeGet("trash");
+  appTrash = all.filter(t=>!t.fromPhone);
+  phoneTrash = all.filter(t=>t.fromPhone);
   trashList = [
     ...appTrash.map(t=>({id:t.id, name:t.name, mime:t.mime, isVideo:t.isVideo, trashedAt:t.trashedAt, blob:t.blob, fromApp:true})),
-    ...phoneTrash.map(t=>({id:"p_"+t.uri, name:t.name, mime:t.mime, isVideo:t.isVideo, uri:t.uri, trashedAt:(t.dateAdded||0)*1000, fromPhone:true}))
+    ...phoneTrash.map(t=>({id:t.id, name:t.name, mime:t.mime, isVideo:t.isVideo, uri:t.uri, trashedAt:t.trashedAt, fromPhone:true}))
   ];
+  trashedUris = new Set(phoneTrash.map(t=>t.uri));
   const d=$("#trashCardD");
   if(d) d.textContent = trashList.length ? ("共 "+trashList.length+" 项 · 上滑照片即可回收") : "上滑照片即可回收，误删可找回";
 }
@@ -690,13 +724,21 @@ function sheetTrashItem(m){
   sheet([{ic:"↩️",t:"恢复",f:()=>restoreFromTrash(m)},
           {ic:"🗑️",t:"彻底删除",f:()=>permanentDelete(m)}],"回收站操作");
 }
+/* 手机照片移入回收站：只做 App 内标记，系统文件不动 */
+async function trashPhone(m){
+  const rec={id:"p_"+m.uri, uri:m.uri, name:m.name, mime:m.mime||m.type||"", isVideo:!!((m.mime||m.type)||"").startsWith("video/"), trashedAt:Date.now(), fromPhone:true};
+  await storePut("trash", rec);
+  trashedUris.add(m.uri);
+  const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
+  lastTrashed={type:"phone", uri:m.uri, id:rec.id};
+  recordStats("trash",1);
+}
 async function restoreFromTrash(m){
   if(m.fromPhone){
-    try{
-      const res=JSON.parse(BRIDGE.restoreTrash(JSON.stringify([m.uri])));
-      if(res[0]&&res[0].ok){ recordStats("restore",1); toast("已恢复（进入 PicaPhoto 相册）"); }
-      else toast("恢复失败");
-    }catch(e){ toast("恢复失败："+e); }
+    await storeDel("trash", m.id);
+    trashedUris.delete(m.uri);
+    recordStats("restore",1);
+    toast("已恢复");
   } else {
     const rec=appTrash.find(t=>t.id===m.id);
     if(rec){
@@ -714,12 +756,14 @@ async function restoreFromTrash(m){
 }
 async function permanentDelete(m){
   if(m.fromPhone){
-    try{ JSON.parse(BRIDGE.deleteTrash(JSON.stringify([m.uri]))); }catch(e){}
+    try{ BRIDGE.deleteTrash(JSON.stringify([m.uri])); }catch(e){}
+    await storeDel("trash", m.id);
+    trashedUris.delete(m.uri);
   } else {
     if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); }
     await storeDel("trash", m.id);
   }
-  toast("已彻底删除");
+  toast("已彻底删除（系统文件已删除）");
   await refreshTrash(); renderTrash();
 }
 async function restoreAllTrash(){
@@ -731,8 +775,10 @@ async function restoreAllTrash(){
     await storePut("media",obj);
     await storeDel("trash",t.id);
   }
-  if(ph.length && BRIDGE){
-    try{ const r=JSON.parse(BRIDGE.restoreTrash(JSON.stringify(ph.map(t=>t.uri)))); n += r.filter(x=>x.ok).length; }catch(e){}
+  for(const t of ph){
+    await storeDel("trash", t.id);
+    trashedUris.delete(t.uri);
+    n++;
   }
   if(n) recordStats("restore", n);
   toast("已恢复 "+n+" 项");
@@ -742,27 +788,26 @@ async function restoreAllTrash(){
 }
 async function emptyTrash(){
   if(!trashList.length) return;
-  if(!confirm("确定清空回收站？此操作不可恢复。")) return;
+  if(!confirm("确定清空回收站？\n手机相册中的照片将真正从系统中删除，不可恢复！")) return;
   for(const m of trashList){
-    if(m.fromPhone){ try{ JSON.parse(BRIDGE.deleteTrash(JSON.stringify([m.uri]))); }catch(e){} }
-    else { if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); } await storeDel("trash",m.id); }
+    if(m.fromPhone){
+      try{ BRIDGE.deleteTrash(JSON.stringify([m.uri])); }catch(e){}
+      await storeDel("trash", m.id);
+      trashedUris.delete(m.uri);
+    } else {
+      if(urls.has(m.id)){ URL.revokeObjectURL(urls.get(m.id)); urls.delete(m.id); }
+      await storeDel("trash",m.id);
+    }
   }
-  toast("回收站已清空");
+  toast("回收站已清空（系统文件已删除）");
   await refreshTrash(); renderTrash();
 }
 
-/* ============ 移入回收站 / 撤销（记录统计，不因删除清空整理） ============ */
+/* ============ 移入回收站 / 撤销（所有删除先进 App 回收站，系统文件不动） ============ */
 async function trashOne(m){
   if(m.uri && m.uri.startsWith("content:")){
-    try{
-      const res=JSON.parse(BRIDGE.trashMedia(JSON.stringify([m.uri])));
-      if(res[0]&&res[0].ok){
-        lastTrashed={type:"phone", uri:m.uri, dst:res[0].dst};
-        const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
-        recordStats("trash",1);
-        toastTrash();
-      } else toast("移入回收站失败");
-    }catch(e){ toast("失败："+e); }
+    await trashPhone(m);
+    toastTrash();
   } else {
     const tr={id:m.id, name:m.name, mime:m.type||"", isVideo:!!(m.type||"").startsWith("video/"), trashedAt:Date.now(), blob:m.blob};
     await storePut("trash",tr);
@@ -781,11 +826,11 @@ async function undoTrash(){
   if(!lastTrashed) return;
   const t=lastTrashed; lastTrashed=null;
   if(t.type==="phone"){
-    try{
-      const res=JSON.parse(BRIDGE.restoreTrash(JSON.stringify([t.dst||t.uri])));
-      if(res[0]&&res[0].ok){ recordStats("restore",1); refreshPhoneAlbums(); toast("已撤销"); }
-      else toast("撤销失败");
-    }catch(e){ toast("撤销失败："+e); }
+    await storeDel("trash", t.id || ("p_"+t.uri));
+    trashedUris.delete(t.uri);
+    recordStats("restore",1);
+    refreshPhoneAlbums();
+    toast("已撤销");
   } else {
     const tr=t.item;
     const obj={id:tr.id, name:tr.name, type:tr.mime, size:0, addedAt:Date.now(), album:null, blob:tr.blob};
@@ -800,6 +845,7 @@ async function undoTrash(){
   if(orgSub==="home") renderHome();
   updateViewerChrome();
 }
+
 /* ============ 全屏查看器（窗口化渲染 + 邻居预加载，解决滑动黑屏 + 提速） ============ */
 let viewerList=[], viewerIdx=0, viewerMode="normal", chromeShow=false;
 let g=null, longT=null, lastTap=0, zoomed=false, chromeTimer=null;
@@ -1220,6 +1266,9 @@ function updateTopbar(){
   const inSub = orgSub!=="home";
   $("#btn-add").textContent = inSub ? "‹" : "＋";
   $("#btn-add").style.display = tab==="me" ? "none" : "";
+  const bm=$("#btn-multi");
+  bm.style.display = (tab==="me" || orgSub!=="photos") ? "none" : "";
+  bm.textContent = multi ? "取消" : "选择";
   $("#fab").style.display = (tab==="me" || orgSub==="trash" || (orgSub==="photos"&&phoneAlbum!==null)) ? "none" : "";
 }
 function switchTab(t){
@@ -1241,6 +1290,38 @@ $("#trashCard").addEventListener("click", openTrashView);
 $("#selAll").addEventListener("click", ()=>{ visibleMedia().forEach(m=>selection.add(itemKey(m))); renderPhotos(); updateSelbar(); });
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
+$("#btn-multi").addEventListener("click", ()=>{ if(!multi) enterMulti(); else exitMulti(); });
+function renderMultiAlbums(){
+  const box=$("#multiAlbums");
+  box.innerHTML="";
+  const add=document.createElement("button"); add.className="mchip new"; add.textContent="＋ 新建相册";
+  add.addEventListener("click", ()=>{ promptInput("新建相册","",async v=>{ if(v){ const a={id:uid(),name:v}; albums.push(a); await storePut("albums",a); moveSelTo(v); } }); });
+  box.appendChild(add);
+  albums.forEach(a=>{
+    const c=document.createElement("button"); c.className="mchip"; c.textContent="📁 "+a.name;
+    c.addEventListener("click", ()=>{ moveSelTo(a.name); });
+    box.appendChild(c);
+  });
+  box.classList.add("show");
+}
+function moveSelTo(name){
+  const list=visibleMedia().filter(m=>selection.has(itemKey(m)));
+  if(!list.length){ exitMulti(); return; }
+  nativeMove(name, list);
+}
+
+/* ============ 安卓返回键：关闭弹层/查看器 → 返回上一级 → 退出 ============ */
+window.__back = function(){
+  try{
+    if($("#viewer").classList.contains("open")){ closeViewer(); return true; }
+    if($("#sheet").classList.contains("open")){ closeSheet(); return true; }
+    if($("#dlg").classList.contains("open")){ $("#dlg").classList.remove("open"); return true; }
+    if($("#updateDlg").classList.contains("open")){ $("#updateDlg").classList.remove("open"); return true; }
+    if(tab==="me"){ switchTab("org"); return true; }
+    if(orgSub!=="home"){ goHome(); return true; }
+    return false;
+  }catch(e){ return false; }
+};
 
 /* ============ 自动更新 ============ */
 function cmpVer(a,b){
