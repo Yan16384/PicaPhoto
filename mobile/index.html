@@ -319,7 +319,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 "use strict";
 /* ============ 原生桥接 ============ */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;      // 当前浏览的手机相册 id
@@ -659,6 +659,8 @@ function nativeMove(name, list){
     const res = JSON.parse(BRIDGE.moveToAlbum(name, uris));
     const ok = res.filter(r=>r.ok).length;
     recordStats("move", ok);
+    phoneMediaCache.clear();
+    if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
     toast(`已移动 ${ok} 项到「${name}」` + (ok<res.length?`，${res.length-ok} 项无权限跳过`:""));
   } catch(e){ toast("移动失败："+e); }
   exitPhoneMode();
@@ -1087,10 +1089,11 @@ async function doTrashCurrent(){
   if(!m) return;
   if(viewerMode==="trash"){
     await permanentDelete(m);
+    const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   } else {
     await trashOne(m);
+    const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   }
-  viewerList.splice(viewerIdx,1);
   afterViewerRemove();
 }
 /* ============ 底部弹层 / 对话框 ============ */
