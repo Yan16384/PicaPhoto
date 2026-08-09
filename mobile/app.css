@@ -296,3 +296,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #phPreview{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;pointer-events:none;animation:fadeIn .15s var(--ease)}
 #phPreview.show{display:flex}
 #phPreview img{max-width:92%;max-height:82%;border-radius:12px;object-fit:contain;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:popIn .2s var(--spring)}
+
+/* 月份分隔占位格（占一个照片位，标注月份分界） */
+.ph-month{display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 10%,var(--card));
+  border:1px dashed var(--line);color:var(--accent);font-size:13px;font-weight:700;letter-spacing:1px}
