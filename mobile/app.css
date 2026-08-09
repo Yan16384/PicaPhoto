@@ -279,6 +279,11 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   border-radius:50%;background:var(--accent);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;
   box-shadow:0 8px 20px rgba(46,88,232,.4);transition:transform .16s var(--spring)}
 #fab:active{transform:scale(.88)}
+/* “完成整理”：批量确认删除已移动照片的源文件 */
+#fabDone{position:fixed;right:14px;bottom:calc(var(--bar-h) + var(--safe-b) + 16px);z-index:70;height:44px;padding:0 18px;
+  border-radius:22px;background:var(--green);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 20px rgba(7,193,96,.4);animation:riseIn .25s var(--ease);transition:transform .14s var(--spring)}
+#fabDone:active{transform:scale(.93)}
 /* ============ 回收站操作按钮 ============ */
 .trash-actions{display:flex;flex-direction:column;align-items:center;margin-top:6px;animation:riseIn .3s var(--ease) both}
 
