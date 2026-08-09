@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.3";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.4";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -13,13 +13,14 @@ const DB_NAME = "picaphoto";
 let db = null;
 function openDB(){
   return new Promise((res,rej)=>{
-    const rq = indexedDB.open(DB_NAME, 3);
+    const rq = indexedDB.open(DB_NAME, 4);
     rq.onupgradeneeded = e => {
       const d = e.target.result;
       if(!d.objectStoreNames.contains("media")) d.createObjectStore("media", {keyPath:"id"});
       if(!d.objectStoreNames.contains("albums")) d.createObjectStore("albums", {keyPath:"id"});
       if(!d.objectStoreNames.contains("trash")) d.createObjectStore("trash", {keyPath:"id"});
       if(!d.objectStoreNames.contains("stats")) d.createObjectStore("stats", {keyPath:"key"});
+      if(!d.objectStoreNames.contains("phonecache")) d.createObjectStore("phonecache", {keyPath:"albumId"});
     };
     rq.onsuccess = e => { db = e.target.result; res(db); };
     rq.onerror = () => rej(rq.error);
@@ -179,13 +180,11 @@ function refreshPhoneAlbums(force){
     for(const key of [...phoneMediaCache.keys()]){ if(!ids.has(key)) phoneMediaCache.delete(key); }
   }catch(e){ phoneAlbums=[]; }
 }
+const PHONE_DB_TTL = 12*3600*1000;   // IndexedDB 持久缓存 12 小时，命中即秒开，后台静默刷新
 function readPhoneMedia(id, cb){
   const c=phoneMediaCache.get(id);
   if(c && Date.now()-c.t<PHONE_CACHE_TTL){ cb && cb(c.items.filter(x=>!trashedUris.has(x.uri))); return; }
-  if(!BRIDGE || !BRIDGE.readMediaAsync){ cb && cb([]); return; }
-  window.__mediaCb = json => {
-    let items=[];
-    try{ items=JSON.parse(json); }catch(e){}
+  const finish = items => {
     phoneMediaCache.set(id,{t:Date.now(), items});
     if(phoneMediaCache.size>PHONE_CACHE_MAX){
       let oldest=null;
@@ -194,9 +193,43 @@ function readPhoneMedia(id, cb){
     }
     cb && cb(items.filter(x=>!trashedUris.has(x.uri)));
   };
-  BRIDGE.readMediaAsync(id, "__mediaCb");
+  const refresh = (silent) => {
+    if(!BRIDGE || !BRIDGE.readMediaAsync){ if(!silent) finish([]); return; }
+    window.__mediaCb = json => {
+      let items=[];
+      try{ items=JSON.parse(json); }catch(e){}
+      phoneMediaCache.set(id,{t:Date.now(), items});
+      try{
+        const t=db.transaction("phonecache","readwrite").objectStore("phonecache").put({albumId:id, items, t:Date.now()});
+        t.onerror=()=>{};
+      }catch(e){}
+      if(!silent) finish(items);
+    };
+    BRIDGE.readMediaAsync(id, "__mediaCb");
+  };
+  /* 内存未命中 → 读 IndexedDB 持久缓存（退出软件后重入 0 加载） */
+  try{
+    const t=db.transaction("phonecache").objectStore("phonecache").get(id);
+    t.onsuccess=()=>{
+      const row=t.result;
+      if(row && row.items && row.items.length){
+        finish(row.items);
+        if(Date.now()-(row.t||0) > PHONE_DB_TTL) refresh(true);   // 后台静默更新
+      } else {
+        refresh(false);
+      }
+    };
+    t.onerror=()=>refresh(false);
+  }catch(e){ refresh(false); }
 }
-function clearPhoneMediaCache(id){ if(id) phoneMediaCache.delete(id); else phoneMediaCache.clear(); try{ localStorage.removeItem("pp_albums_cache"); }catch(e){} }
+function clearPhoneMediaCache(id){
+  if(id){ phoneMediaCache.delete(id); try{ db.transaction("phonecache","readwrite").objectStore("phonecache").delete(id); }catch(e){} }
+  else {
+    phoneMediaCache.clear();
+    try{ db.transaction("phonecache","readwrite").objectStore("phonecache").clear(); }catch(e){}
+    try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
+  }
+}
 function requestPhonePermission(){
   if(!BRIDGE) return;
   BRIDGE.requestPermission();
@@ -325,7 +358,7 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
   v.addEventListener("touchmove", e=>{
     if(!active || multi) return;
     const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
-    if(Math.abs(dx)>30 && Math.abs(dx)>Math.abs(dy)*1.3){
+    if(Math.abs(dx)>20 && Math.abs(dx)>Math.abs(dy)*1.2){
       active=false;
       /* 进入管理模式的同时选中手指当前的照片，滑动即开始选 */
       const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
@@ -499,25 +532,27 @@ function nativeMove(name, list){
   if(!list || !list.length) return;
   try {
     const uris = JSON.stringify(list.map(m=>m.uri));
-    toast("正在移动…");
-    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ toast("移动失败"); return; }
+    /* 乐观移入：先从当前网格移除（假装已移走），后台慢慢移动，失败自动恢复 */
+    const removed=[];
+    for(const m of list){ const idx=phoneMedia.indexOf(m); if(idx>=0){ phoneMedia.splice(idx,1); removed.push(m); } }
+    exitMulti();
+    renderPhotos(true);
+    toast("正在移入「"+name+"」"+list.length+" 项…");
+    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ for(const m of removed) phoneMedia.push(m); renderPhotos(true); toast("移动失败"); return; }
     window.__moveCb = resJson => {
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       const ok=res.filter(r=>r.ok).length, fail=res.length-ok;
       if(ok) recordStats("move", ok);
       clearPhoneMediaCache();
-      if(ok>0){
-        /* 移入后留在当前相册并刷新网格 */
-        if(phoneAlbum!==null){
-          readPhoneMedia(phoneAlbum, items=>{ phoneMedia=items; });
-        }
-        if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
-        exitMulti();
-        renderPhotos();
-        toast(ok+" 项已移入「"+name+"」"+(fail>0?"，"+fail+" 项无权限跳过":""));
+      if(fail>0){
+        /* 失败项恢复显示 */
+        for(const m of removed){ if(phoneMedia.indexOf(m)<0) phoneMedia.push(m); }
+        renderPhotos(true);
+        toast(ok>0 ? ("已移动 "+ok+" 项，「"+name+"」"+fail+" 项无权限跳过") : "移动失败：无权限或无法移动");
       } else {
-        toast("移动失败：所选照片无权限或无法移动");
+        toast("已移入「"+name+"」"+ok+" 项");
       }
+      if(ok>0 && BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
     };
     BRIDGE.moveToAlbumAsync(name, uris, "__moveCb");
   } catch(e){ toast("移动失败："+e); }
@@ -790,9 +825,15 @@ function setSlideContent(el, m){
     else if(v.src!==src){ v.src=src; v.controls=true; }
     else v.controls=true;
   } else {
-    let im=el.querySelector("img");
-    if(!im){ el.innerHTML='<img src="'+src+'" alt="" decoding="async">'; }
-    else if(im.src!==src){ im.src=src; }
+    /* 缩略图先行（blur 占位，即点即用），原图加载完成后渐显覆盖 */
+    const thumb = m.thumb || "";
+    let full=el.querySelector("img.full");
+    if(!full){
+      el.innerHTML=(thumb?'<img class="thumb" src="'+thumb+'" alt="" decoding="async">':'')+'<img class="full" src="" alt="" decoding="async">';
+      full=el.querySelector("img.full");
+      full.onload=()=>{ full.classList.add("show"); };
+    }
+    if(full.src!==src){ full.classList.remove("show"); full.src=src; }
   }
 }
 function preloadIdx(i){
@@ -856,18 +897,25 @@ function moveOutCurrent(name){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(!m.uri || !m.uri.startsWith("content:")){ toast("仅系统相册照片支持移出"); return; }
-  if(!BRIDGE || !BRIDGE.moveOutAlbumAsync){ toast("移出失败"); return; }
+  /* 乐观移出 */
+  const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
+  const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
+  afterViewerRemove();
+  toast("正在移出「"+name+"」…");
+  if(!BRIDGE || !BRIDGE.moveOutAlbumAsync){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移出失败"); return; }
   try{
     window.__moCb = resJson => {
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       if(res[0]&&res[0].ok){
         recordStats("move",1);
         clearPhoneMediaCache();
-        const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
-        const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
-        afterViewerRemove();
         toast("已移出「"+name+"」到 PicaPhoto");
-      } else toast("移出失败");
+      } else {
+        if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
+        if(pi>=0 && phoneMedia.indexOf(m)<0) phoneMedia.splice(pi,0,m);
+        afterViewerRemove();
+        toast("移出失败");
+      }
     };
     BRIDGE.moveOutAlbumAsync(JSON.stringify([m.uri]), "__moCb");
   }catch(e){ toast("移出失败："+e); }
@@ -892,18 +940,26 @@ async function moveCurrentTo(name){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(m.uri && m.uri.startsWith("content:")){
-    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ toast("移动失败"); return; }
+    /* 乐观移入：立即从大图列表移除，后台移动，失败恢复 */
+    const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
+    const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
+    afterViewerRemove();
+    toast("正在移入「"+name+"」…");
+    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移动失败"); return; }
     try{
       window.__mcCb = resJson => {
         let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
         if(res[0]&&res[0].ok){
           recordStats("move",1);
           clearPhoneMediaCache();
-          const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
-          const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
-          afterViewerRemove();
           toast("已移入「"+name+"」");
-        } else toast("移动失败");
+        } else {
+          /* 恢复 */
+          if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
+          if(pi>=0 && phoneMedia.indexOf(m)<0) phoneMedia.splice(pi,0,m);
+          afterViewerRemove();
+          toast("移动失败");
+        }
       };
       BRIDGE.moveToAlbumAsync(name, JSON.stringify([m.uri]), "__mcCb");
     }catch(e){ toast("移动失败："+e); }
