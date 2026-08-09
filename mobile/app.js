@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.3";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.4";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -166,8 +166,8 @@ function fmtBytes(n){
 
 /* ============ 手机相册（原生桥接） ============ */
 let phoneMediaCache = new Map();
-const PHONE_CACHE_TTL = 300000;      // 5 分钟
-const PHONE_CACHE_MAX = 12;          // 最多缓存 12 个相册，防内存膨胀
+const PHONE_CACHE_TTL = 30*24*3600*1000;   // 内存缓存 30 天（只要照片不删就一直有效）
+const PHONE_CACHE_MAX = 20;          // 最多缓存 20 个相册，防内存膨胀
 function adjustAlbumCounts(){
   /* 相册计数 = 系统原始数 - 已在回收站（App 内软删除）的照片数；基于 rawCount 不重复减 */
   try{
@@ -196,7 +196,7 @@ function refreshPhoneAlbums(force){
     for(const key of [...phoneMediaCache.keys()]){ if(!ids.has(key)) phoneMediaCache.delete(key); }
   }catch(e){ phoneAlbums=[]; }
 }
-const PHONE_DB_TTL = 12*3600*1000;   // IndexedDB 持久缓存 12 小时，命中即秒开，后台静默刷新
+const PHONE_DB_TTL = 7*24*3600*1000;   // IndexedDB 持久缓存 7 天，命中即秒开，后台静默刷新
 function readPhoneMedia(id, cb){
   if(id==="unfiled"){
     if(!BRIDGE || !BRIDGE.readUnfiledAsync){ cb && cb([]); return; }
@@ -242,9 +242,8 @@ function readPhoneMedia(id, cb){
       const row=t.result;
       if(row && row.items && row.items.length){
         finish(row.items);
-        /* 旧版缓存（无 albumNames）或过期 → 后台静默刷新 */
-        const stale = !row.items[0].albumNames || (Date.now()-(row.t||0) > PHONE_DB_TTL);
-        if(stale) refresh(true);
+        /* 仅缓存过期才后台静默刷新（不因字段缺失反复重查） */
+        if(Date.now()-(row.t||0) > PHONE_DB_TTL) refresh(true);
       } else {
         refresh(false);
       }
@@ -271,9 +270,15 @@ function openPhoneAlbum(id, name){
   exitMulti();
   phoneMedia = [];
   showOrg();
-  $("#photos").innerHTML = '<div class="empty"><div class="big">⏳</div>正在加载相册…</div>';
+  /* 有缓存立即显示（秒开），无缓存才显示加载中 */
+  const c=phoneMediaCache.get(id);
+  const fresh = c && Date.now()-c.t<PHONE_CACHE_TTL;
+  if(!fresh){
+    $("#photos").innerHTML = '<div class="empty"><div class="big">⏳</div>正在加载相册…</div>';
+  }
   readPhoneMedia(id, items=>{
     phoneMedia = items;
+    if(id==="unfiled") unfiledTotal = items.length;
     renderPhotos();
   });
 }
@@ -325,8 +330,9 @@ function renderHome(){
     box.appendChild(p);
     p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
   } else if(BRIDGE){
+    const visibleAlbs = phoneAlbums.filter(a=>!hiddenAlbums.has(a.id));
     const g=document.createElement("div"); g.className="pgalb-grid";
-    phoneAlbums.forEach((a,ai)=>{
+    visibleAlbs.forEach((a,ai)=>{
       const c=document.createElement("div"); c.className="pgalb anim-pop";
       c.dataset.albumId=a.id;
       c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div class="cover-ph">'+escapeHtml((a.name||"相").charAt(0))+'</div>')+'</div><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
@@ -336,10 +342,24 @@ function renderHome(){
       g.appendChild(c);
     });
     box.appendChild(g);
-    if(!phoneAlbums.length){
+    if(!visibleAlbs.length){
       const p=document.createElement("div"); p.className="full empty";
-      p.innerHTML='<div class="big">📭</div>手机相册为空<br><span style="font-size:13px">下拉可刷新</span>';
+      p.innerHTML='<div class="big">📭</div>手机相册为空'+(hiddenAlbums.size?'<br><span style="font-size:13px">已隐藏 '+hiddenAlbums.size+' 个相册</span>':'<br><span style="font-size:13px">下拉可刷新</span>');
       box.appendChild(p);
+    }
+    /* 隐藏相册单独板块（最下方） */
+    const hiddenAlbs = phoneAlbums.filter(a=>hiddenAlbums.has(a.id));
+    if(hiddenAlbs.length){
+      box.appendChild(h("隐藏相册 · 照片计入未整理"));
+      const hg=document.createElement("div"); hg.className="pgalb-grid hide-alb-grid";
+      hiddenAlbs.forEach(a=>{
+        const c=document.createElement("div"); c.className="pgalb";
+        c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div class="cover-ph">'+escapeHtml((a.name||"相").charAt(0))+'</div>')+'</div><span class="hide-tag">隐藏</span><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
+        c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
+        bindLong(c, ()=>{ hiddenAlbums.delete(a.id); saveHidden(); renderHome(); toast("已取消隐藏「"+a.name+"」"); });
+        hg.appendChild(c);
+      });
+      box.appendChild(hg);
     }
   } else {
     const p=document.createElement("div"); p.className="full empty";
@@ -350,16 +370,24 @@ function renderHome(){
   nb.addEventListener("click", ()=>{ if(!BRIDGE){ toast("请在 App 中使用"); return; } promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } }); });
   box.appendChild(nb);
 }
-/* 隐藏相册管理：勾选隐藏的相册照片计入“未整理” */
+/* 隐藏相册管理：多选面板（勾选多个，点完成保存） */
 function manageHiddenAlbums(){
   if(!phoneAlbums.length){ toast("暂无可管理的相册"); return; }
-  const opts = phoneAlbums.map(a=>({
-    ic: hiddenAlbums.has(a.id) ? "✅" : "⬜",
-    t: a.name + (hiddenAlbums.has(a.id) ? "（已隐藏→未整理）" : ""),
-    f: ()=>{ if(hiddenAlbums.has(a.id)) hiddenAlbums.delete(a.id); else hiddenAlbums.add(a.id); saveHidden(); }
-  }));
-  opts.push({ic:"✔️",t:"完成",f:()=>{ renderHome(); toast(hiddenAlbums.size?("已隐藏 "+hiddenAlbums.size+" 个相册，照片计入未整理"):"未隐藏任何相册"); }});
-  sheet(opts, "隐藏相册（照片计入未整理）");
+  const list=$("#hideList"); list.innerHTML="";
+  phoneAlbums.forEach(a=>{
+    const row=document.createElement("div");
+    row.className="hide-row"+(hiddenAlbums.has(a.id)?" on":"");
+    row.innerHTML='<span class="ck">'+(hiddenAlbums.has(a.id)?"✅":"⬜")+'</span><span class="nm">'+escapeHtml(a.name)+'</span>';
+    row.addEventListener("click", ()=>{
+      if(hiddenAlbums.has(a.id)) hiddenAlbums.delete(a.id); else hiddenAlbums.add(a.id);
+      row.classList.toggle("on");
+      row.querySelector(".ck").textContent = hiddenAlbums.has(a.id)?"✅":"⬜";
+      $("#hideDone").textContent="完成 ("+hiddenAlbums.size+")";
+    });
+    list.appendChild(row);
+  });
+  $("#hideDone").textContent="完成 ("+hiddenAlbums.size+")";
+  $("#hidePanel").classList.add("open");
 }
 /* 手机相册管理：删除相册（询问是否删除相册内照片）/ 刷新 */
 function phoneAlbumMenu(a){
@@ -448,12 +476,12 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     if(nc!==gridCols){
       gridCols=nc;
       try{ localStorage.setItem("pp_grid_cols", String(gridCols)); }catch(e){}
-      applyGridCols(true);
+      applyGridCols(false);   // 拖动中即时响应，不做动画（不卡）
       vibrate(8);
     }
   },{passive:false});
-  v.addEventListener("touchend", ()=>{ pinch0=0; },{passive:true});
-  v.addEventListener("touchcancel", ()=>{ pinch0=0; },{passive:true});
+  v.addEventListener("touchend", ()=>{ if(pinch0>0) applyGridCols(true); pinch0=0; },{passive:true});
+  v.addEventListener("touchcancel", ()=>{ if(pinch0>0) applyGridCols(true); pinch0=0; },{passive:true});
 })();
 
 /* ============ 照片网格（一次性全量渲染 + 月份分隔 + 滚动位置保持） ============ */
@@ -463,19 +491,22 @@ function applyGridCols(animate){
   if(!box || box.className!=="ph-grid") return;
   const setCols=()=>{ box.style.gridTemplateColumns="repeat("+gridCols+",1fr)"; };
   if(!animate){ setCols(); return; }
-  /* FLIP：记录旧位置→改列数→位移过渡到新位置，捏合平滑不顿挫 */
+  /* FLIP：只对可见区域的项做位移过渡（大列表不卡），其余直接应用 */
   const els=[...box.children];
-  const first=els.map(el=>{ const r=el.getBoundingClientRect(); return {l:r.left,t:r.top}; });
+  const view=$("#view-photos");
+  const vTop=view?view.scrollTop:0, vBottom=vTop+(view?view.clientHeight:600);
+  const visible=[];
+  els.forEach((el,i)=>{ const r=el.getBoundingClientRect(); if(r.top<vBottom && r.bottom>vTop) visible.push({el,i,first:{l:r.left,t:r.top}}); });
   setCols();
   requestAnimationFrame(()=>{
-    els.forEach((el,i)=>{
+    visible.forEach(({el,first})=>{
       const r=el.getBoundingClientRect();
-      const dx=first[i].l-r.left, dy=first[i].t-r.top;
+      const dx=first.l-r.left, dy=first.t-r.top;
       if(dx||dy){ el.style.transition="none"; el.style.transform="translate("+dx+"px,"+dy+"px)"; }
     });
     requestAnimationFrame(()=>{
-      els.forEach(el=>{ el.style.transition="transform .32s var(--ease)"; el.style.transform=""; });
-      setTimeout(()=>els.forEach(el=>{ el.style.transition=""; }),360);
+      visible.forEach(({el})=>{ el.style.transition="transform .32s var(--ease)"; el.style.transform=""; });
+      setTimeout(()=>visible.forEach(({el})=>{ el.style.transition=""; }),360);
     });
   });
 }
@@ -522,6 +553,13 @@ function renderPhotos(keepScroll){
   box.className = "ph-grid";
   box.innerHTML = "";
   applyGridCols();
+  /* 未整理视图顶部：已整理 X / 总数 Y */
+  if(phoneAlbum==="unfiled" && unfiledTotal>0){
+    const prog=document.createElement("div");
+    prog.className="unfiled-progress full";
+    prog.innerHTML='📊 已整理 <b>'+(unfiledTotal-items.length)+'</b> / '+unfiledTotal;
+    box.appendChild(prog);
+  }
   const frag=document.createDocumentFragment();
   let lastMonth=null, idx=0;
   items.forEach(m=>{
@@ -677,7 +715,8 @@ async function removeSelected(){
 /* ============ 回收站（App 内软删除：系统文件不动，清空回收站时才真正删除） ============ */
 let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册中过滤
 let pendingMoves = new Set();  // 已复制到目标但源照片待系统确认删除的 uri（“完成整理”统一处理）
-let hiddenAlbums = new Set(JSON.parse(localStorage.getItem("pp_hidden")||"[]"));  // 隐藏相册 id → 照片计入“未整理”
+let hiddenAlbums = new Set(JSON.parse(localStorage.getItem("pp_hidden")||"[]"));
+let unfiledTotal = 0;   // 未整理视图加载总数（已整理 = 总数 - 当前剩余）  // 隐藏相册 id → 照片计入“未整理”
 function saveHidden(){ try{ localStorage.setItem("pp_hidden", JSON.stringify([...hiddenAlbums])); }catch(e){} }
 async function refreshTrash(){
   const all = await storeGetAll("trash");
@@ -1273,7 +1312,7 @@ function renderMe(){
   s.innerHTML=`
     <div class="me-head">
       <img src="icon-192.png" alt="">
-      <div><div class="me-name">PicaPhoto</div><div class="me-ver">移动版 v${APP_VERSION} · Phoom 手势 · 自动更新</div></div>
+      <div><div class="me-name">PicaPhoto</div><div class="me-ver">移动版 v${APP_VERSION} · 自动更新</div></div>
     </div>
     <div class="stat-grid">
       <div class="stat"><b>${stats.organizedTotal}</b><span>累计整理</span></div>
@@ -1299,7 +1338,7 @@ function renderMe(){
     <div class="set-group">
       <div class="set-row" id="rowTheme"><div class="tt"><div class="n">外观主题</div><div class="d" id="themeDesc">${themeDesc}</div></div>
         <div class="switch ${darkOn?'on':''}" id="swTheme"></div></div>
-      <div class="set-row" id="rowVWork"><div class="tt"><div class="n">相册位置</div><div class="d">大图整理时相册按钮位置：${vworkPos==="bottom"?"下部·横滑":vworkPos==="left"?"左部·竖滑靠左":"右部·竖滑靠右"}</div></div><span class="arrow">›</span></div>
+      <div class="set-row" id="rowVWork"><div class="tt"><div class="n">相册位置</div><div class="d">大图整理时相册按钮位置：${vworkPos==="bottom"?"下部·横滑":vworkPos==="left"?"左部·竖滑·照片靠右":"右部·竖滑·照片靠左"}</div></div><span class="arrow">›</span></div>
     </div>
     <div class="set-h2">关于</div>
     <div class="set-group">
@@ -1319,8 +1358,8 @@ function renderMe(){
   $("#rowVWork").addEventListener("click", ()=>{
     sheet([
       {ic:"⬇️",t:"下部（左右滑动）",f:()=>{vworkPos="bottom";localStorage.setItem("pp_vwork","bottom");applyVWork();renderMe();}},
-      {ic:"⬅️",t:"左部（上下滑动·照片靠左）",f:()=>{vworkPos="left";localStorage.setItem("pp_vwork","left");applyVWork();renderMe();}},
-      {ic:"➡️",t:"右部（上下滑动·照片靠右）",f:()=>{vworkPos="right";localStorage.setItem("pp_vwork","right");applyVWork();renderMe();}}
+      {ic:"⬅️",t:"左部（上下滑动·照片靠右）",f:()=>{vworkPos="left";localStorage.setItem("pp_vwork","left");applyVWork();renderMe();}},
+      {ic:"➡️",t:"右部（上下滑动·照片靠左）",f:()=>{vworkPos="right";localStorage.setItem("pp_vwork","right");applyVWork();renderMe();}}
     ],"相册位置");
   });
   $("#swTheme").addEventListener("click", e=>{
@@ -1475,6 +1514,8 @@ $("#trashCard").addEventListener("click", openTrashView);
 /* 回收站卡片右侧小方块：一键清空回收站 */
 $("#trashClear").addEventListener("click", e=>{ e.stopPropagation(); emptyTrash(); });
 $("#selDone").addEventListener("click", exitMulti);
+$("#hideDone").addEventListener("click", ()=>{ saveHidden(); $("#hidePanel").classList.remove("open"); renderHome(); toast(hiddenAlbums.size?("已隐藏 "+hiddenAlbums.size+" 个相册，照片计入未整理"):"未隐藏任何相册"); });
+$("#hideCancel").addEventListener("click", ()=>{ $("#hidePanel").classList.remove("open"); });
 /* “完成整理”：一次性批量确认删除已移动照片的源文件 */
 function updateFabDone(){
   const n=pendingMoves.size;
@@ -1594,6 +1635,19 @@ async function init(){
   showOrg();
   renderMe();
   if(!BRIDGE && navigator.serviceWorker){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+  /* 后台回前台：页面被系统清空时重新初始化，避免白屏 */
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.hidden) return;
+    const albumsBox=$("#albums"), photosBox=$("#photos");
+    const empty = (!albumsBox || !albumsBox.childElementCount) && (!photosBox || !photosBox.childElementCount);
+    if(empty){
+      try{ if(db) db.close(); db=null; }catch(e){}
+      init();
+    } else if(BRIDGE && BRIDGE.hasPermission){
+      refreshPhoneAlbums();
+      if(orgSub==="home") renderHome();
+    }
+  });
   window.addEventListener("online", ()=>toast("已联网"));
   checkUpdate(false);   // 打开自动检测新版本
 }
