@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.1";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.2";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -51,6 +51,8 @@ let stats = { organizedTotal:0, organizedByDay:{}, trashTotal:0, restoreTotal:0,
 let calYear, calMonth;
 let statsDirty = 0, statsTimer = null;
 let storageCache = { t:0, bytes:0 };
+let gridCols = (parseInt(localStorage.getItem("pp_grid_cols")||"3",10)||3);
+gridCols = Math.max(2, Math.min(6, gridCols));
 
 /* ============ 工具 ============ */
 const $ = s => document.querySelector(s);
@@ -218,8 +220,9 @@ function createdAlbums(){ try{ return JSON.parse(localStorage.getItem("pp_create
 function addCreated(n){ const a=createdAlbums(); if(!a.includes(n)){ a.push(n); localStorage.setItem("pp_created", JSON.stringify(a)); } }
 function removeCreated(n){ localStorage.setItem("pp_created", JSON.stringify(createdAlbums().filter(x=>x!==n))); }
 function albumTargets(){
+  /* 所有手机相册（含 PicaPhoto 系列与系统相册）+ 用户新建相册 */
   const map=new Map();
-  phoneAlbums.forEach(a=>{ if(a.pica) map.set(a.name, a); });
+  phoneAlbums.forEach(a=>{ map.set(a.name, a); });
   createdAlbums().forEach(n=>{ if(!map.has(n)) map.set(n,{name:n}); });
   return [...map.values()];
 }
@@ -315,13 +318,39 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
   v.addEventListener("touchmove", e=>{
     if(!active || multi) return;
     const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
-    if(Math.abs(dx)>45 && Math.abs(dx)>Math.abs(dy)*1.5){
+    if(Math.abs(dx)>30 && Math.abs(dx)>Math.abs(dy)*1.3){
       active=false;
-      enterMulti();
-      toast("管理模式：点击选择，点下方相册移入");
+      /* 进入管理模式的同时选中手指当前的照片，滑动即开始选 */
+      const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+      const ph=el && el.closest ? el.closest(".ph") : null;
+      const firstKey = ph && ph.dataset.key ? ph.dataset.key : null;
+      enterMulti(firstKey ? [firstKey] : []);
+      toast(firstKey ? "管理模式：继续滑动连续选择" : "管理模式：点击选择");
     }
   },{passive:true});
   v.addEventListener("touchend", ()=>{ active=false; },{passive:true});
+})();
+/* 小图网格：双指捏合调整排列（张开=变大，最多横排2；合拢=变小，最少横排6） */
+(function(){
+  const v=$("#view-photos");
+  let pinch0=0, cols0=gridCols;
+  v.addEventListener("touchstart", e=>{
+    if(e.touches.length===2){ pinch0=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); cols0=gridCols; }
+  },{passive:true});
+  v.addEventListener("touchmove", e=>{
+    if(e.touches.length<2 || pinch0<=0) return;
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    let nc = cols0 - Math.round((d-pinch0)/70);
+    nc = Math.max(2, Math.min(6, nc));
+    if(nc!==gridCols){
+      gridCols=nc;
+      try{ localStorage.setItem("pp_grid_cols", String(gridCols)); }catch(e){}
+      applyGridCols();
+      vibrate(8);
+    }
+  },{passive:true});
+  v.addEventListener("touchend", ()=>{ pinch0=0; },{passive:true});
+  v.addEventListener("touchcancel", ()=>{ pinch0=0; },{passive:true});
 })();
 /* 管理模式：横向滑动可连续选中（点选/取消仍有效） */
 (function(){
@@ -349,6 +378,7 @@ let phEls = new Map();
 let phRendered = 0;
 let phObserver = null;
 const PH_CHUNK = 60;
+function applyGridCols(){ const box=$("#photos"); if(box && box.className==="ph-grid") box.style.gridTemplateColumns="repeat("+gridCols+",1fr)"; }
 function buildPhotoEl(m){
   const key = itemKey(m);
   const el = document.createElement("div");
@@ -399,6 +429,7 @@ function renderPhotos(keepScroll){
   }
   box.className = "ph-grid";
   box.innerHTML = "";
+  applyGridCols();
   renderChunk(items);
   if(keepScroll && prevTop>0 && view){ requestAnimationFrame(()=>{ view.scrollTop = prevTop; }); }
 }
@@ -412,12 +443,14 @@ function toggleSel(key, el){
   else { selection.add(key); el&&el.classList.add("sel-on"); }
   refreshBadges();
 }
-function enterMulti(){
-  multi = true; selection = new Set(); renderPhotos();
+function enterMulti(initial){
+  multi = true; selection = new Set(initial||[]);
+  renderPhotos();
   $("#selbar").classList.add("show");
   $("#selDel").style.display = "";
   if(phoneAlbum!==null) renderMultiAlbums();
   $("#title").textContent = "选择照片";
+  refreshBadges();
 }
 function exitMulti(){
   multi = false; selection = new Set();
@@ -459,10 +492,17 @@ function nativeMove(name, list){
     const fail = res.length-ok;
     if(fail>0){ toast("已移动 "+ok+" 项，「"+name+"」"+fail+" 项无权限跳过"); }
     else { toast("已移动 "+ok+" 项到「"+name+"」"); }
-    if(fail===0 && ok>0){ exitPhoneMode(); }
-    else if(ok>0){ /* 部分失败：留在相册并刷新网格 */
-      phoneMedia = readPhoneMedia(phoneAlbum);
+    if(ok>0){
+      /* 移入后留在当前相册并刷新网格（不再返回主界面） */
+      clearPhoneMediaCache();
+      if(phoneAlbum!==null) phoneMedia = readPhoneMedia(phoneAlbum);
+      if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
+      exitMulti();
       renderPhotos();
+      if(fail>0) toast("已移动 "+ok+" 项，「"+name+"」"+fail+" 项无权限跳过");
+      else toast("已移动 "+ok+" 项到「"+name+"」");
+    } else {
+      toast("移动失败：所选照片无权限或无法移动");
     }
   } catch(e){ toast("移动失败："+e); }
 }
@@ -776,14 +816,44 @@ function updateViewerChrome(){
     work.querySelectorAll(".vchip").forEach(c=>{
       c.addEventListener("click", ()=>{
         if(c.id==="vNew"){ promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>moveCurrentTo(v)); } }); }
+        else if(c.classList.contains("on")){ moveOutCurrent(c.dataset.alb); }
         else { moveCurrentTo(c.dataset.alb); }
       });
     });
+    /* 实时检测当前照片所属相册并高亮 */
+    if(m.uri && m.uri.startsWith("content:") && BRIDGE && BRIDGE.readAlbumOf){
+      try{
+        const albumsOf = JSON.parse(BRIDGE.readAlbumOf(m.uri)||"[]");
+        const names = new Set(albumsOf.map(a=>a.name));
+        if(names.size){
+          work.querySelectorAll(".vchip[data-alb]").forEach(c=>{
+            if(names.has(c.dataset.alb)) c.classList.add("on");
+          });
+        }
+      }catch(e){}
+    }
     $("#vFav").addEventListener("click", ()=>{ toggleFav(viewerList[viewerIdx]); });
     $("#vUndo").addEventListener("click", ()=>{ undoTrash(); });
     $("#vTrash").addEventListener("click", ()=>{ doTrashCurrent(); });
     $("#vClose2").addEventListener("click", closeViewer);
   }
+}
+/* 大图浏览：把当前照片移出所属相册（移到 PicaPhoto 整理区） */
+async function moveOutCurrent(name){
+  const m=viewerList[viewerIdx];
+  if(!m) return;
+  if(!m.uri || !m.uri.startsWith("content:")){ toast("仅系统相册照片支持移出"); return; }
+  try{
+    const res=JSON.parse(BRIDGE.moveOutAlbum(JSON.stringify([m.uri])));
+    if(res[0]&&res[0].ok){
+      recordStats("move",1);
+      clearPhoneMediaCache();
+      const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
+      const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
+      afterViewerRemove();
+      toast("已移出「"+name+"」到 PicaPhoto");
+    } else toast("移出失败");
+  }catch(e){ toast("移出失败："+e); }
 }
 function afterViewerRemove(){
   if(!viewerList.length){ closeViewer(); return; }
@@ -930,15 +1000,10 @@ async function doTrashCurrent(){
   const m=viewerList[viewerIdx];
   if(!m) return;
   const cur=vSlots.find(s=>s.idx===viewerIdx);
-  if(cur){ cur.el.classList.add("flyout-up"); await new Promise(r=>setTimeout(r,150)); }
-  if(viewerMode==="trash"){
-    await permanentDelete(m);
-    const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
-  } else {
-    await trashOne(m);
-    const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
-  }
-  afterViewerRemove();
+  if(cur){ cur.el.classList.add("flyout-up"); await new Promise(r=>setTimeout(r,140)); }
+  const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
+  afterViewerRemove();   // 先重建视图，避免等待异步删除导致黑屏
+  if(viewerMode==="trash"){ await permanentDelete(m); } else { await trashOne(m); }
 }
 
 /* ============ 底部弹层 / 对话框 ============ */
@@ -1141,9 +1206,9 @@ function hideOrgViews(){
   ["view-home","view-photos","view-trash"].forEach(id=>$("#"+id).classList.remove("active"));
 }
 function updateTopbar(){
-  const inSub = orgSub!=="home";
-  $("#btn-add").textContent = inSub ? "‹" : "＋";
-  $("#btn-add").style.display = tab==="me" ? "none" : "";
+  const inSub = orgSub!=="home" && tab==="org";
+  $("#btn-back").style.display = inSub ? "" : "none";
+  $("#btn-add").style.display = (tab==="me" || inSub) ? "none" : "";
 }
 function switchTab(t){
   tab = t;
@@ -1166,6 +1231,13 @@ function refreshActiveView(){
   else if(orgSub==="trash"){ refreshTrash().then(renderTrash); }
 }
 document.querySelectorAll(".tab").forEach(t=>{ t.addEventListener("click", ()=>{ switchTab(t.dataset.tab); }); });
+/* 左上角返回 / 右上角新建 */
+$("#btn-back").addEventListener("click", ()=>{ if(tab==="org" && orgSub!=="home") goHome(); });
+$("#btn-add").addEventListener("click", ()=>{
+  if(tab==="me" || orgSub!=="home") return;
+  if(!BRIDGE){ toast("请在 App 中使用"); return; }
+  promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } });
+});
 $("#trashCard").addEventListener("click", openTrashView);
 $("#selDone").addEventListener("click", exitMulti);
 $("#selMove").addEventListener("click", moveSelected);
