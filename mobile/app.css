@@ -69,7 +69,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .ph .idx{position:absolute;left:4px;bottom:4px;min-width:20px;height:20px;padding:0 4px;border-radius:10px;
   background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:12px;font-weight:700;
   animation:pop .28s var(--spring);z-index:2}
-.ph.multi .idx{display:flex}
+.ph.sel-on .idx{display:flex}
 .ph.sel-on{outline:3px solid var(--accent);outline-offset:-3px}
 .ph.sel-on::after{content:"";position:absolute;inset:0;animation:pulse .45s var(--ease)}
 .ph .dur{position:absolute;right:4px;bottom:4px;font-size:10px;color:#fff;background:rgba(0,0,0,.55);
@@ -280,3 +280,9 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 /* 删除/回收飞离动画 */
 .flyout-up{animation:flyoutUp .18s var(--ease) both}
 .bump{animation:bounce .3s var(--spring)}
+
+/* 大图浏览：当前照片所属相册高亮 */
+.vchip.on{background:color-mix(in srgb,var(--green) 16%,var(--card));color:var(--green);border:1.5px solid var(--green)}
+.vchip.on::after{content:"✓";margin-left:2px;font-weight:800}
+.vchip.on:active{background:color-mix(in srgb,var(--danger) 16%,var(--card));color:var(--danger);border-color:var(--danger)}
+.vchip.on:active::after{content:"移出";font-size:11px}
