@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.5";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.6";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -488,6 +488,21 @@ function exitMulti(){
   $("#multiAlbums").classList.remove("show");
   $("#multiAlbums").innerHTML = "";
   if(orgSub==="photos") updateTitle();
+}
+function selectAll(){
+  const items=visibleMedia();
+  const allKeys=items.map(m=>itemKey(m));
+  const allSelected = allKeys.length && allKeys.every(k=>selection.has(k));
+  if(allSelected){
+    selection = new Set();
+    phEls.forEach((el,key)=>{ el.classList.remove("sel-on"); const b=el.querySelector(".idx"); if(b) b.textContent=""; });
+  } else {
+    selection = new Set(allKeys);
+    phEls.forEach((el,key)=>{
+      if(selection.has(key)){ el.classList.add("sel-on"); const b=el.querySelector(".idx"); if(b) b.textContent=[...selection].indexOf(key)+1; }
+    });
+  }
+  refreshBadges();
 }
 function updateSelbar(){
   const c=$("#selCount");
@@ -1349,6 +1364,7 @@ $("#btn-add").addEventListener("click", ()=>{
 });
 $("#trashCard").addEventListener("click", openTrashView);
 $("#selDone").addEventListener("click", exitMulti);
+$("#selAll").addEventListener("click", selectAll);
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
 function renderMultiAlbums(){
