@@ -51,9 +51,13 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .ph-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
 .ph{aspect-ratio:1;background:var(--card);border-radius:6px;overflow:hidden;position:relative}
 .ph img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.ph .sel{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;
-  background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:13px}
-.ph.multi .sel{display:flex}
+.ph .idx{position:absolute;left:4px;bottom:4px;min-width:20px;height:20px;padding:0 4px;border-radius:10px;
+  background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+  animation:pop .25s ease;z-index:2}
+.ph.multi .idx{display:flex}
+@keyframes pop{0%{transform:scale(.4)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+@keyframes flyout{to{transform:scale(.5);opacity:0}}
+@keyframes toastpop{0%{transform:translateX(-50%) translateY(10px) scale(.9)}100%{transform:translateX(-50%) translateY(0) scale(1)}}
 .ph.sel-on{outline:3px solid var(--accent);outline-offset:-3px}
 .ph .dur{position:absolute;right:4px;bottom:4px;font-size:10px;color:#fff;background:rgba(0,0,0,.55);
   padding:1px 5px;border-radius:6px}
@@ -141,43 +145,44 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .cal-legend .l2{background:color-mix(in srgb,var(--accent) 55%,var(--card))}
 .cal-legend .l3{background:var(--accent)}
 
-/* ============ 全屏查看器（窗口化 + 预加载，Phoom 手势） ============ */
-#viewer{position:fixed;inset:0;background:#000;z-index:100;display:none;touch-action:none;overflow:hidden}
-#viewer.open{display:block}
+/* ============ 大图整理：上预览区 + 下工作区（窗口化 + 预加载） ============ */
+#viewer{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;flex-direction:column;touch-action:none;overflow:hidden}
+#viewer.open{display:flex}
+#vPreview{position:relative;flex:1;background:#000;overflow:hidden;min-height:0}
 #vTrack{position:absolute;inset:0;will-change:transform;transform:translate(0,0)}
 #viewer .slide{position:absolute;inset:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
   transform:translateX(0);transition:none;will-change:transform}
 #viewer .slide.peek{transform:translateX(0) scale(1.05)}
 #viewer .slide.zoomed img{transform:scale(2.2);transition:transform .25s ease}
 #viewer img,#viewer video{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;
-  pointer-events:none;user-select:none;-webkit-user-drag:none;content-visibility:auto}
+  pointer-events:none;user-select:none;-webkit-user-drag:none}
 #viewer video{pointer-events:auto}
-.v-top{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;align-items:center;gap:10px;
-  padding:calc(var(--safe-t) + 10px) 14px 10px;color:#fff;
-  background:linear-gradient(rgba(0,0,0,.55),transparent);opacity:1;transition:opacity .25s}
-.v-top.hidden{opacity:0;pointer-events:none}
-.v-top .v-count{flex:1;font-size:14px;font-weight:600}
-.v-top .v-btn{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:16px;
-  display:flex;align-items:center;justify-content:center}
-.v-bottom{position:absolute;left:0;right:0;bottom:0;z-index:6;display:flex;align-items:center;justify-content:space-around;
-  gap:10px;padding:14px 24px calc(var(--safe-b) + 14px);color:#fff;
-  background:linear-gradient(transparent,rgba(0,0,0,.55));opacity:1;transition:opacity .25s}
-.v-bottom.hidden{opacity:0;pointer-events:none}
-.v-bottom .v-btn{width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;font-size:22px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:transform .12s}
-.v-bottom .v-btn:active{transform:scale(.92)}
-.v-bottom .v-btn span{font-size:10px;font-weight:400}
-.v-bottom .v-btn.on{background:var(--accent)}
-.v-bottom .v-btn.danger{background:var(--danger)}
-#vHint{position:absolute;top:calc(var(--safe-t) + 60px);left:50%;transform:translateX(-50%);z-index:7;
-  color:#fff;font-size:13px;background:rgba(0,0,0,.45);padding:6px 14px;border-radius:16px;opacity:0;
+.v-count{position:absolute;top:calc(var(--safe-t) + 10px);left:14px;z-index:6;color:#fff;font-size:13px;font-weight:600;
+  background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px}
+.v-close{position:absolute;top:calc(var(--safe-t) + 8px);right:12px;z-index:6;width:34px;height:34px;border-radius:50%;
+  background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center}
+#vHint{position:absolute;top:calc(var(--safe-t) + 52px);left:50%;transform:translateX(-50%);z-index:7;
+  color:#fff;font-size:12px;background:rgba(0,0,0,.45);padding:5px 12px;border-radius:14px;opacity:0;
   transition:opacity .2s;white-space:nowrap}
 #vHint.show{opacity:1}
 #vTrashZone{position:absolute;top:0;left:0;right:0;z-index:8;display:flex;flex-direction:column;align-items:center;gap:2px;
-  padding:calc(var(--safe-t) + 12px) 0;background:rgba(229,69,69,.94);color:#fff;font-size:14px;font-weight:600;
+  padding:calc(var(--safe-t) + 10px) 0;background:rgba(229,69,69,.94);color:#fff;font-size:14px;font-weight:600;
   transform:translateY(-100%);transition:transform .2s}
 #vTrashZone.show{transform:translateY(0)}
-#vTrashZone .ic{font-size:28px}
+#vTrashZone .ic{font-size:26px}
+#vWork{flex:none;background:var(--card);border-top:1px solid var(--line);padding:10px 12px calc(var(--safe-b) + 12px)}
+.vw-albums{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.vw-albums::-webkit-scrollbar{display:none}
+.vchip{flex:none;height:34px;padding:0 14px;border-radius:17px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;
+  display:flex;align-items:center;gap:6px;transition:transform .12s}
+.vchip:active{transform:scale(.94)}
+.vchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
+.vw-btns{display:flex;gap:10px}
+.vw-btns button{flex:1;height:44px;border-radius:12px;background:var(--bg);border:1px solid var(--line);font-size:14px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:transform .12s}
+.vw-btns button:active{transform:scale(.96)}
+.vw-btns button.on{background:var(--accent);color:#fff;border:none}
+.vw-btns button.danger{background:var(--danger);color:#fff;border:none}
 
 /* ============ 多选栏 ============ */
 #selbar{position:fixed;left:0;right:0;bottom:0;z-index:80;display:flex;align-items:center;gap:10px;
@@ -256,7 +261,6 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 <header id="topbar">
   <img class="logo" src="icon-192.png" alt="">
   <h1 id="title">整理</h1>
-  <button class="tb-btn" id="btn-multi" aria-label="多选" style="display:none">多选</button>
   <button class="tb-btn" id="btn-add" aria-label="添加">＋</button>
 </header>
 
@@ -281,24 +285,23 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   <div class="tab" data-tab="me"><span class="ic">👤</span>我的</div>
 </nav>
 
-<div id="fab">＋</div>
 
-<!-- 全屏查看器：左右滑动切换 / 上滑回收 / 下滑返回 / 点按工具栏 / 长按 Peek -->
+<!-- 大图整理：上预览区 + 下工作区 -->
 <div id="viewer">
-  <div id="vTrack"></div>
-  <div id="vTrashZone"><span class="ic">🗑️</span><span>松手移入回收站</span></div>
-  <div id="vHint">↑ 上滑回收 · ↓ 下滑返回</div>
-  <div class="v-top hidden" id="vTop">
-    <span class="v-count" id="vCount">1 / 1</span>
-    <button class="v-btn" id="vClose">✕</button>
+  <div id="vPreview">
+    <div id="vTrack"></div>
+    <div id="vTrashZone"><span class="ic">🗑️</span><span>松手移入回收站</span></div>
+    <div id="vHint">↑ 上滑回收 · ↓ 下滑返回 · 捏合返回</div>
+    <div class="v-count" id="vCount">1 / 1</div>
+    <button class="v-close" id="vClose">✕</button>
   </div>
-  <div class="v-bottom hidden" id="vBottom"></div>
+  <div id="vWork"></div>
 </div>
 
 <div id="multiAlbums"></div>
 <div id="selbar">
   <span class="count" id="selCount">0 项</span>
-  <button class="sbtn" id="selAll">全选</button>
+  <button class="sbtn" id="selDone">完成</button>
   <button class="sbtn green" id="selMove">移动到</button>
   <button class="sbtn danger" id="selDel">删除</button>
 </div>
@@ -333,7 +336,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 "use strict";
 /* ============ 原生桥接 ============ */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.2";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;      // 当前浏览的手机相册 id
@@ -506,53 +509,54 @@ function bindLong(el, fn){
   el.addEventListener("touchmove", ()=>{ clearTimeout(th); },{passive:true});
   el.addEventListener("touchend", ()=>{ clearTimeout(th); });
 }
+function createdAlbums(){ try{ return JSON.parse(localStorage.getItem("pp_created")||"[]"); }catch(e){ return []; } }
+function addCreated(n){ const a=createdAlbums(); if(!a.includes(n)){ a.push(n); localStorage.setItem("pp_created", JSON.stringify(a)); } }
+function removeCreated(n){ localStorage.setItem("pp_created", JSON.stringify(createdAlbums().filter(x=>x!==n))); }
+function albumTargets(){
+  const map=new Map();
+  phoneAlbums.forEach(a=>{ if(a.pica) map.set(a.name, a); });
+  createdAlbums().forEach(n=>{ if(!map.has(n)) map.set(n,{name:n}); });
+  return [...map.values()];
+}
+function createSystemAlbum(name, cb){
+  try{ BRIDGE.createAlbum(name); }catch(e){ toast("创建失败："+e); return; }
+  addCreated(name);
+  refreshPhoneAlbums(true);
+  if(cb) cb();
+}
 function renderHome(){
   const box=$("#albums");
   box.className="";
   box.innerHTML="";
-  const cover=media.find(m=>!isVideo(m)) || media[0];
-  const big=document.createElement("div"); big.className="big-alb";
-  big.innerHTML=`<div class="cover">${cover?'<img loading="lazy" decoding="async" src="'+objURL(cover)+'" alt="">':'<div style="height:100%"></div>'}</div>
-    <div class="meta"><div class="n">所有照片/视频</div><div class="d">${media.length} 项 · 我的整理空间</div></div>`;
-  big.addEventListener("click", ()=>{ currentAlbum=null; openPhotosView(null); });
-  box.appendChild(big);
-  box.appendChild(h("我的相册"));
-  const row=document.createElement("div"); row.className="chip-row";
-  const add=chip("＋ 新建","相册","new");
-  add.addEventListener("click", ()=>promptInput("新建相册","",async v=>{ if(v){ const a={id:uid(),name:v}; albums.push(a); await storePut("albums",a); saveState(); }}));
-  row.appendChild(add);
-  albums.forEach(a=>{
-    const items=media.filter(m=>m.album===a.id);
-    const c=chip(a.name, items.length+" 项","alb");
-    c.addEventListener("click", ()=>{ openPhotosView(a.id); });
-    bindLong(c, ()=>albumMenu(a));
-    row.appendChild(c);
-  });
-  box.appendChild(row);
-  if(BRIDGE){
-    box.appendChild(h("手机相册"));
-    if(!BRIDGE.hasPermission()){
+  box.appendChild(h("手机相册"));
+  if(BRIDGE && !BRIDGE.hasPermission()){
+    const p=document.createElement("div"); p.className="full empty";
+    p.innerHTML=`<div class="big">🖼️</div>需要权限才能读取手机相册<br><button class="big-btn" id="btnPerm">授权读取相册</button>`;
+    box.appendChild(p);
+    p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
+  } else if(BRIDGE){
+    const g=document.createElement("div"); g.className="pgalb-grid";
+    phoneAlbums.forEach(a=>{
+      const c=document.createElement("div"); c.className="pgalb";
+      c.innerHTML=`<div class="cover">${a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div style="height:100%"></div>'}</div><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${a.count} 项</div>`;
+      c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
+      bindLong(c, ()=>phoneAlbumMenu(a));
+      g.appendChild(c);
+    });
+    box.appendChild(g);
+    if(!phoneAlbums.length){
       const p=document.createElement("div"); p.className="full empty";
-      p.innerHTML=`<div class="big">🖼️</div>需要权限才能读取手机相册<br><button class="big-btn" id="btnPerm">授权读取相册</button>`;
+      p.innerHTML=`<div class="big">📭</div>手机相册为空<br><span style="font-size:13px">下拉可刷新</span>`;
       box.appendChild(p);
-      p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
-    } else {
-      const g=document.createElement("div"); g.className="pgalb-grid";
-      phoneAlbums.forEach(a=>{
-        const c=document.createElement("div"); c.className="pgalb";
-        c.innerHTML=`<div class="cover">${a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div style="height:100%"></div>'}</div><div class="name">${escapeHtml(a.name)}</div><div class="cnt">${a.count} 项</div>`;
-        c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
-        bindLong(c, ()=>phoneAlbumMenu(a));
-        g.appendChild(c);
-      });
-      box.appendChild(g);
-      if(!phoneAlbums.length){
-        const p=document.createElement("div"); p.className="full empty";
-        p.innerHTML=`<div class="big">📭</div>手机相册为空<br><span style="font-size:13px">下拉可刷新</span>`;
-        box.appendChild(p);
-      }
     }
+  } else {
+    const p=document.createElement("div"); p.className="full empty";
+    p.innerHTML=`<div class="big">📱</div>请安装安卓版 PicaPhoto 使用`;
+    box.appendChild(p);
   }
+  const nb=document.createElement("button"); nb.className="big-btn"; nb.textContent="＋ 新建相册";
+  nb.addEventListener("click", ()=>{ if(!BRIDGE){ toast("请在 App 中使用"); return; } promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } }); });
+  box.appendChild(nb);
 }
 /* 我的相册管理：重命名 / 删除（询问是否删除相册内照片） */
 function albumMenu(a){
@@ -577,23 +581,16 @@ async function confirmDeleteAlbum(a){
 /* 手机相册管理：删除相册（询问是否删除相册内照片）/ 刷新 */
 function phoneAlbumMenu(a){
   sheet([{ic:"🗑️",t:"删除相册",f:()=>confirmDeletePhoneAlbum(a)},
-          {ic:"⟳",t:"刷新列表",f:()=>{ refreshPhoneAlbums(true); renderHome(); toast("已刷新"); }}],"管理手机相册");
+          {ic:"⟳",t:"刷新列表",f:()=>{ refreshPhoneAlbums(true); renderHome(); toast("已刷新"); }}],"管理相册");
 }
 function confirmDeletePhoneAlbum(a){
-  if(!confirm(`删除手机相册「${a.name}」？\n相册内的 ${a.count} 张照片将移入回收站（可恢复，系统文件不删除）。\n确定？`)) return;
+  if(!confirm(`删除相册「${a.name}」？\n相册内的 ${a.count} 张照片将从系统中真正删除，不可恢复！`)) return;
   let items=[];
   try{ items=JSON.parse(BRIDGE.readMedia(a.id)); }catch(e){ items=[]; }
-  (async ()=>{
-    let n=0;
-    for(const it of items){
-      if(it && it.uri && !trashedUris.has(it.uri)){ await trashPhone(it); n++; }
-    }
-    phoneMediaCache.delete(a.id);
-    refreshPhoneAlbums(true);
-    await refreshTrash();
-    toast("已将 "+n+" 张照片移入回收站");
-    renderHome();
-  })();
+  const uris=items.map(x=>x.uri).filter(u=>u && !trashedUris.has(u));
+  if(!uris.length){ toast("相册为空"); return; }
+  removeCreated(a.name);
+  requestRealDelete(uris);   // 系统确认弹窗，确认后 __deleted 刷新
 }
 function openPhotosView(albumId){ currentAlbum=albumId; orgSub="photos"; exitMulti(); showOrg(); }
 function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum===null?media:media.filter(m=>m.album===currentAlbum)); }
@@ -633,25 +630,12 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     if(Math.abs(dx)>45 && Math.abs(dx)>Math.abs(dy)*1.5){
       active=false;
       enterMulti();
-      toast("管理模式：滑动或点击选择，点下方相册移入");
+      toast("管理模式：点击选择，点下方相册移入");
     }
   },{passive:true});
   v.addEventListener("touchend", ()=>{ active=false; },{passive:true});
 })();
-/* 管理模式：手指滑过即选中（点击切换选中/取消） */
-(function(){
-  const box=$("#photos");
-  let dragSel=false;
-  box.addEventListener("touchstart", ()=>{ if(multi) dragSel=true; },{passive:true});
-  box.addEventListener("touchmove", e=>{
-    if(!multi || !dragSel) return;
-    const t=e.touches[0];
-    const el=document.elementFromPoint(t.clientX, t.clientY);
-    const ph=el && el.closest ? el.closest(".ph") : null;
-    if(ph && !ph.classList.contains("sel-on")) ph.click();
-  },{passive:true});
-  box.addEventListener("touchend", ()=>{ dragSel=false; },{passive:true});
-})();
+/* 管理模式：只支持点击选中/取消（滑动仅用于进入模式） */
 
 /* ============ 照片网格（懒加载加速） ============ */
 function renderPhotos(){
@@ -667,20 +651,17 @@ function renderPhotos(){
     const key = itemKey(m);
     const el = document.createElement("div");
     el.className = "ph";
-    el.innerHTML = `<img loading="lazy" decoding="async" src="${m.thumb||m.uri||objURL(m)}" alt=""><span class="sel">✓</span>${isVideo(m)?'<span class="dur">▶</span>':''}`;
-    if(multi && selection.has(key)) el.classList.add("sel-on");
+    el.innerHTML = `<img loading="lazy" decoding="async" src="${m.thumb||m.uri||objURL(m)}" alt=""><span class="idx"></span>${isVideo(m)?'<span class="dur">▶</span>':''}`;
+    if(multi && selection.has(key)){ el.classList.add("sel-on"); el.querySelector(".idx").textContent = [...selection].indexOf(key)+1; }
     if(multi) el.classList.add("multi");
     el.addEventListener("click", ()=>{ if(multi){ toggleSel(key, el); } else { openViewer(items, items.indexOf(m), "normal"); } });
-    let th;
-    el.addEventListener("touchstart", ()=>{ th=setTimeout(()=>{ if(!multi){ vibrate(15); enterMulti(); } },500); },{passive:true});
-    el.addEventListener("touchmove", ()=>{ clearTimeout(th); },{passive:true});
-    el.addEventListener("touchend", ()=>{ clearTimeout(th); });
     box.appendChild(el);
   });
 }
 function toggleSel(key, el){
   if(selection.has(key)){ selection.delete(key); el&&el.classList.remove("sel-on"); }
   else { selection.add(key); el&&el.classList.add("sel-on"); }
+  renderPhotos();
   updateSelbar();
 }
 function enterMulti(){
@@ -688,7 +669,6 @@ function enterMulti(){
   $("#selbar").classList.add("show");
   $("#selDel").style.display = "";
   if(phoneAlbum!==null) renderMultiAlbums();
-  $("#btn-multi").textContent = "取消";
   $("#title").textContent = "选择照片";
 }
 function exitMulti(){
@@ -698,7 +678,6 @@ function exitMulti(){
   $("#multiAlbums").innerHTML = "";
   renderPhotos();
   if(orgSub==="photos") updateTitle();
-  const bm=$("#btn-multi"); if(bm) bm.textContent = "选择";
 }
 function updateSelbar(){ $("#selCount").textContent = selection.size + " 项"; }
 function updateTitle(){
@@ -712,14 +691,9 @@ function updateTitle(){
 function moveSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
-  if(phoneAlbum!==null){
-    const opts = albums.map(a=>({ic:"📁",t:a.name,f:()=>nativeMove(a.name,list)}));
-    opts.push({ic:"➕",t:"新建相册…",f:()=>promptInput("新建相册","",async v=>{ if(v){ nativeMove(v,list); } })});
-    sheet(opts,"移动到相册");
-    return;
-  }
-  const opts = [{ic:"🗂️",t:"移回未整理",f:async ()=>{ list.forEach(m=>{m.album=null;}); list.forEach(m=>storePut("media",m)); recordStats("move",list.length); toast("已移回未整理"); saveState(); }},
-    ...albums.map(a=>({ic:"📁",t:a.name,f:async ()=>{ list.forEach(m=>{m.album=a.id;}); list.forEach(m=>storePut("media",m)); recordStats("move",list.length); toast("已移动到「"+a.name+"」"); saveState(); }}))];
+  if(phoneAlbum===null){ toast("请先进入手机相册"); return; }
+  const opts = albumTargets().map(a=>({ic:"📁",t:a.name,f:()=>nativeMove(a.name,list)}));
+  opts.push({ic:"➕",t:"新建相册…",f:()=>promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>nativeMove(v,list)); } })});
   sheet(opts,"移动到相册");
 }
 function nativeMove(name, list){
@@ -942,7 +916,6 @@ function openViewer(list, idx, mode){
   setTrack(0,0,1,false);
   updateViewerChrome();
   document.body.style.overflow="hidden";
-  showChrome(false);
   $("#vHint").classList.add("show");
   $("#vHint").textContent = mode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
   setTimeout(()=>{ if($("#viewer").classList.contains("open")) $("#vHint").classList.remove("show"); },2200);
@@ -986,9 +959,9 @@ function setSlideContent(el, m){
   const src=objURL(m);
   if(isVideo(m)){
     let v=el.querySelector("video");
-    if(!v){ el.innerHTML=`<video src="${src}" playsinline ${chromeShow?"controls":""}></video>`; }
-    else if(v.src!==src){ v.src=src; }
-    else v.controls=chromeShow;
+    if(!v){ el.innerHTML=`<video src="${src}" playsinline controls></video>`; }
+    else if(v.src!==src){ v.src=src; v.controls=true; }
+    else v.controls=true;
   } else {
     let im=el.querySelector("img");
     if(!im){ el.innerHTML=`<img src="${src}" alt="" decoding="async">`; }
@@ -1005,28 +978,43 @@ function updateViewerChrome(){
   const m=viewerList[viewerIdx];
   if(!m) return;
   $("#vCount").textContent=(viewerIdx+1)+" / "+viewerList.length;
-  const vb=$("#vBottom");
+  const work=$("#vWork");
   if(viewerMode==="trash"){
-    vb.innerHTML=`<button class="v-btn" id="vRestore">↩️<span>恢复</span></button>
-                  <button class="v-btn danger" id="vDel">🗑️<span>删除</span></button>`;
+    work.innerHTML=`<div class="vw-btns"><button id="vRestore">↩️ 恢复</button><button class="danger" id="vDel">🗑️ 彻底删除</button></div>`;
     $("#vRestore").addEventListener("click", async ()=>{
       const mm=viewerList[viewerIdx];
       await restoreFromTrash(mm);
-      viewerList.splice(viewerIdx,1); afterViewerRemove();
+      const i=viewerList.indexOf(mm); if(i>=0) viewerList.splice(i,1); afterViewerRemove();
     });
     $("#vDel").addEventListener("click", async ()=>{
       const mm=viewerList[viewerIdx];
       await permanentDelete(mm);
-      viewerList.splice(viewerIdx,1); afterViewerRemove();
+      const i=viewerList.indexOf(mm); if(i>=0) viewerList.splice(i,1); afterViewerRemove();
     });
   } else {
     const f=isFav(m);
-    vb.innerHTML=`<button class="v-btn ${f?'on':''}" id="vFav">${f?'♥':'♡'}<span>${f?'已收藏':'收藏'}</span></button>
-                  <button class="v-btn" id="vUndo" style="${lastTrashed?'':'display:none'}">↩️<span>撤销</span></button>
-                  <button class="v-btn" id="vAlbum">📁<span>移动</span></button>`;
+    let chips=`<div class="vchip new" id="vNew">＋ 新建</div>`;
+    albumTargets().forEach(a=>{ chips+=`<div class="vchip" data-alb="${escapeHtml(a.name)}">${escapeHtml(a.name)}</div>`; });
+    work.innerHTML=`<div class="vw-albums">${chips}</div>
+      <div class="vw-btns">
+        <button class="${f?'on':''}" id="vFav">${f?'♥':'♡'} 收藏</button>
+        <button id="vUndo" style="${lastTrashed?'':'display:none'}">↩ 撤销</button>
+        <button id="vTrash">🗑 回收</button>
+        <button id="vClose2">✕ 关闭</button>
+      </div>`;
+    work.querySelectorAll(".vchip").forEach(c=>{
+      c.addEventListener("click", ()=>{
+        if(c.id==="vNew"){
+          promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>moveCurrentTo(v)); } });
+        } else {
+          moveCurrentTo(c.dataset.alb);
+        }
+      });
+    });
     $("#vFav").addEventListener("click", ()=>{ toggleFav(viewerList[viewerIdx]); });
     $("#vUndo").addEventListener("click", ()=>{ undoTrash(); });
-    $("#vAlbum").addEventListener("click", ()=>{ moveCurrent(); });
+    $("#vTrash").addEventListener("click", ()=>{ doTrashCurrent(); });
+    $("#vClose2").addEventListener("click", closeViewer);
   }
 }
 function afterViewerRemove(){
@@ -1044,29 +1032,31 @@ function moveViewer(step){
   setTrack(0,0,1,true);
   updateViewerChrome();
 }
-function moveCurrent(){
+async function moveCurrentTo(name){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(m.uri && m.uri.startsWith("content:")){
-    const opts=albums.map(a=>({ic:"📁",t:a.name,f:()=>{ nativeMove(a.name,[m]); closeViewer(); }}));
-    opts.push({ic:"➕",t:"新建相册…",f:()=>promptInput("新建相册","",async v=>{ if(v){ nativeMove(v,[m]); closeViewer(); } })});
-    sheet(opts,"移动到相册"); return;
+    try{
+      const res=JSON.parse(BRIDGE.moveToAlbum(name, JSON.stringify([m.uri])));
+      if(res[0]&&res[0].ok){
+        recordStats("move",1);
+        phoneMediaCache.clear();
+        const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
+        afterViewerRemove();
+        toast("已移入「"+name+"」");
+      } else toast("移动失败");
+    }catch(e){ toast("移动失败："+e); }
+  } else {
+    const a=albums.find(x=>x.name===name);
+    m.album = a ? a.id : null;
+    await storePut("media", m);
+    recordStats("move",1);
+    toast("已移入「"+name+"」");
+    updateViewerChrome();
   }
-  const opts=[{ic:"🗂️",t:"移回未整理",f:async ()=>{ m.album=null; await storePut("media",m); recordStats("move",1); toast("已移动"); }},
-    ...albums.map(a=>({ic:"📁",t:a.name,f:async ()=>{ m.album=a.id; await storePut("media",m); recordStats("move",1); toast("已移动到「"+a.name+"」"); }}))];
-  sheet(opts,"移动到相册");
 }
-function showChrome(show){
-  chromeShow=show;
-  $("#vTop").classList.toggle("hidden", !show);
-  $("#vBottom").classList.toggle("hidden", !show);
-  vSlots.forEach(s=>{ const v=s.el.querySelector("video"); if(v) v.controls=show; });
-}
-function toggleChrome(){
-  showChrome(!chromeShow);
-  if(chromeShow){ clearTimeout(chromeTimer); chromeTimer=setTimeout(()=>{ showChrome(false); },2800); }
-  else clearTimeout(chromeTimer);
-}
+function showChrome(show){}
+function toggleChrome(){}
 
 /* ---- 手势：左右切换 / 上滑回收 / 下滑返回 / 点按工具栏 / 长按 Peek ---- */
 $("#viewer").addEventListener("touchstart", e=>{
@@ -1161,9 +1151,6 @@ $("#viewer").addEventListener("touchend", e=>{
       const s=vSlots.find(x=>x.idx===viewerIdx);
       if(s) s.el.classList.toggle("zoomed", zoomed);
       lastTap=0;
-    } else {
-      lastTap=now;
-      toggleChrome();
     }
   }
 },{passive:true});
@@ -1227,9 +1214,9 @@ async function addFiles(files){
 $("#btn-add").addEventListener("click", ()=>{
   if(tab==="me") return;
   if(orgSub==="photos" || orgSub==="trash"){ goHome(); return; }
-  fileInput.click();
+  if(!BRIDGE){ toast("请在 App 中使用"); return; }
+  promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } });
 });
-$("#fab").addEventListener("click", ()=>{ if(phoneAlbum===null) fileInput.click(); });
 fileInput.addEventListener("change", ()=>{ if(fileInput.files.length) addFiles(fileInput.files); fileInput.value=""; });
 
 /* ============ 我的：统计 / 日历 / 存储 / 设置 ============ */
@@ -1367,10 +1354,6 @@ function updateTopbar(){
   const inSub = orgSub!=="home";
   $("#btn-add").textContent = inSub ? "‹" : "＋";
   $("#btn-add").style.display = tab==="me" ? "none" : "";
-  const bm=$("#btn-multi");
-  bm.style.display = (tab==="me" || orgSub!=="photos") ? "none" : "";
-  bm.textContent = multi ? "取消" : "多选";
-  $("#fab").style.display = (tab==="me" || orgSub==="trash" || (orgSub==="photos"&&phoneAlbum!==null)) ? "none" : "";
 }
 function switchTab(t){
   tab = t;
@@ -1388,17 +1371,16 @@ function switchTab(t){
 }
 document.querySelectorAll(".tab").forEach(t=>{ t.addEventListener("click", ()=>{ switchTab(t.dataset.tab); }); });
 $("#trashCard").addEventListener("click", openTrashView);
-$("#selAll").addEventListener("click", ()=>{ visibleMedia().forEach(m=>selection.add(itemKey(m))); renderPhotos(); updateSelbar(); });
+$("#selDone").addEventListener("click", exitMulti);
 $("#selMove").addEventListener("click", moveSelected);
 $("#selDel").addEventListener("click", removeSelected);
-$("#btn-multi").addEventListener("click", ()=>{ if(!multi) enterMulti(); else exitMulti(); });
 function renderMultiAlbums(){
   const box=$("#multiAlbums");
   box.innerHTML="";
   const add=document.createElement("button"); add.className="mchip new"; add.textContent="＋ 新建相册";
-  add.addEventListener("click", ()=>{ promptInput("新建相册","",async v=>{ if(v){ const a={id:uid(),name:v}; albums.push(a); await storePut("albums",a); moveSelTo(v); } }); });
+  add.addEventListener("click", ()=>{ promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>moveSelTo(v)); } }); });
   box.appendChild(add);
-  albums.forEach(a=>{
+  albumTargets().forEach(a=>{
     const c=document.createElement("button"); c.className="mchip"; c.textContent="📁 "+a.name;
     c.addEventListener("click", ()=>{ moveSelTo(a.name); });
     box.appendChild(c);
