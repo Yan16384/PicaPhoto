@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.7";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.8";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -858,6 +858,8 @@ function buildSlides(){
       track.appendChild(el);
       slot={idx:i, el}; vSlots.push(slot);
     }
+    /* 关键：复用 slide 时清除动画残留（flyout-up 会 opacity:0 导致黑屏） */
+    slot.el.classList.remove("flyout-up","peek","zoomed");
     setSlideContent(slot.el, viewerList[i]);
     keep.add(slot);
   }
