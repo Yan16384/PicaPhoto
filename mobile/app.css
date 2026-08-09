@@ -313,12 +313,12 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 /* ============ 大图相册位置：下部 / 左部 / 右部 ============ */
 #viewer{flex-direction:column}
 #viewer[data-vwork="left"],#viewer[data-vwork="right"]{flex-direction:row}
-#viewer[data-vwork="left"] #vWork,#viewer[data-vwork="right"] #vWork{width:96px;max-height:none;overflow-y:auto;border-top:none;padding:10px 8px calc(var(--safe-b) + 10px)}
+#viewer[data-vwork="left"] #vWork,#viewer[data-vwork="right"] #vWork{width:118px;max-height:none;overflow-y:auto;border-top:none;padding:calc(var(--safe-t) + 10px) 10px calc(var(--safe-b) + 10px)}
 #viewer[data-vwork="left"] #vWork{border-right:1px solid var(--line)}
 #viewer[data-vwork="right"] #vWork{border-left:1px solid var(--line)}
 #viewer[data-vwork="left"] .vw-albums,#viewer[data-vwork="right"] .vw-albums{flex-direction:column;overflow-y:auto;overflow-x:hidden;padding:2px 0 8px}
 #viewer[data-vwork="left"] .vw-btns,#viewer[data-vwork="right"] .vw-btns{flex-direction:column;gap:6px}
-#viewer[data-vwork="left"] .vchip,#viewer[data-vwork="right"] .vchip{width:100%;justify-content:center;height:30px;padding:0 6px;font-size:12px}
+#viewer[data-vwork="left"] .vchip,#viewer[data-vwork="right"] .vchip{width:100%;justify-content:center;height:42px;border-radius:12px;padding:0 8px;font-size:13px;margin-bottom:6px}
 #viewer[data-vwork="left"] .slide{justify-content:flex-start}
 #viewer[data-vwork="right"] .slide{justify-content:flex-end}
 /* 下部：一行放不下自动两行，两行仍放不下横向滑动 */
