@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.4";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.5";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -182,6 +182,15 @@ function refreshPhoneAlbums(force){
 }
 const PHONE_DB_TTL = 12*3600*1000;   // IndexedDB 持久缓存 12 小时，命中即秒开，后台静默刷新
 function readPhoneMedia(id, cb){
+  if(id==="unfiled"){
+    if(!BRIDGE || !BRIDGE.readUnfiledAsync){ cb && cb([]); return; }
+    window.__mediaCb = json => {
+      let items=[]; try{ items=JSON.parse(json); }catch(e){}
+      cb && cb(items.filter(x=>!trashedUris.has(x.uri)));
+    };
+    BRIDGE.readUnfiledAsync("__mediaCb");
+    return;
+  }
   const c=phoneMediaCache.get(id);
   if(c && Date.now()-c.t<PHONE_CACHE_TTL){ cb && cb(c.items.filter(x=>!trashedUris.has(x.uri))); return; }
   const finish = items => {
@@ -214,7 +223,9 @@ function readPhoneMedia(id, cb){
       const row=t.result;
       if(row && row.items && row.items.length){
         finish(row.items);
-        if(Date.now()-(row.t||0) > PHONE_DB_TTL) refresh(true);   // 后台静默更新
+        /* 旧版缓存（无 albumNames）或过期 → 后台静默刷新 */
+        const stale = !row.items[0].albumNames || (Date.now()-(row.t||0) > PHONE_DB_TTL);
+        if(stale) refresh(true);
       } else {
         refresh(false);
       }
@@ -277,6 +288,12 @@ function renderHome(){
   box.className="";
   box.innerHTML="";
   box.appendChild(h("手机相册"));
+  if(BRIDGE && BRIDGE.readUnfiledAsync){
+    const uf=document.createElement("div"); uf.className="tool-card";
+    uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理</div><div class="d">没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
+    uf.addEventListener("click", ()=>{ openPhoneAlbum("unfiled","未整理"); });
+    box.appendChild(uf);
+  }
   if(BRIDGE && !BRIDGE.hasPermission()){
     const p=document.createElement("div"); p.className="full empty";
     p.innerHTML='<div class="big">🖼️</div>需要权限才能读取手机相册<br><button class="big-btn" id="btnPerm">授权读取相册</button>';
@@ -287,7 +304,7 @@ function renderHome(){
     phoneAlbums.forEach((a,ai)=>{
       const c=document.createElement("div"); c.className="pgalb anim-pop";
       c.dataset.albumId=a.id;
-      c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div style="height:100%"></div>')+'</div><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
+      c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div class="cover-ph">'+escapeHtml((a.name||"相").charAt(0))+'</div>')+'</div><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
       c.style.animationDelay=(ai*40)+"ms";
       c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
       bindLong(c, ()=>phoneAlbumMenu(a));
@@ -350,67 +367,32 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     pullStart=null; pulled=0;
   },{passive:true});
 })();
-/* 照片网格：横向滑动进入管理模式 */
+/* 照片网格手势：横向滑动无感进入管理模式并持续连选（第一次滑动即选中路径上的照片，无顿挫） */
 (function(){
   const v=$("#view-photos");
-  let sx=null, sy=null, active=false;
-  v.addEventListener("touchstart", e=>{ if(e.touches.length===1){ sx=e.touches[0].clientX; sy=e.touches[0].clientY; active=true; } },{passive:true});
-  v.addEventListener("touchmove", e=>{
-    if(!active || multi) return;
-    const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
-    if(Math.abs(dx)>20 && Math.abs(dx)>Math.abs(dy)*1.2){
-      active=false;
-      /* 进入管理模式的同时选中手指当前的照片，滑动即开始选 */
-      const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-      const ph=el && el.closest ? el.closest(".ph") : null;
-      const firstKey = ph && ph.dataset.key ? ph.dataset.key : null;
-      enterMulti(firstKey ? [firstKey] : []);
-      toast(firstKey ? "管理模式：继续滑动连续选择" : "管理模式：点击选择");
-    }
-  },{passive:true});
-  v.addEventListener("touchend", ()=>{ active=false; },{passive:true});
-})();
-/* 小图网格：双指捏合调整排列（张开=变大，最多横排2；合拢=变小，最少横排6） */
-(function(){
-  const v=$("#view-photos");
-  let pinch0=0, cols0=gridCols;
+  let gsx=null, gsy=null, gActive=false, gMode=null, gLastKey=null;
   v.addEventListener("touchstart", e=>{
-    if(e.touches.length===2){ pinch0=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); cols0=gridCols; }
+    if(e.touches.length!==1) return;
+    gsx=e.touches[0].clientX; gsy=e.touches[0].clientY; gActive=true; gMode=null; gLastKey=null;
   },{passive:true});
   v.addEventListener("touchmove", e=>{
-    if(e.touches.length<2 || pinch0<=0) return;
-    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
-    let nc = cols0 - Math.round((d-pinch0)/70);
-    nc = Math.max(2, Math.min(6, nc));
-    if(nc!==gridCols){
-      gridCols=nc;
-      try{ localStorage.setItem("pp_grid_cols", String(gridCols)); }catch(e){}
-      applyGridCols();
-      vibrate(8);
-    }
-  },{passive:true});
-  v.addEventListener("touchend", ()=>{ pinch0=0; },{passive:true});
-  v.addEventListener("touchcancel", ()=>{ pinch0=0; },{passive:true});
-})();
-/* 管理模式：横向滑动可连续选中（点选/取消仍有效） */
-(function(){
-  const box=$("#photos");
-  let sx=null, sy=null, mode=null, active=false, lastKey=null;
-  box.addEventListener("touchstart", e=>{ if(multi && e.touches.length===1){ sx=e.touches[0].clientX; sy=e.touches[0].clientY; mode=null; active=true; lastKey=null; } },{passive:true});
-  box.addEventListener("touchmove", e=>{
-    if(!multi || !active || sx===null) return;
-    const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
-    if(mode===null && (Math.abs(dx)>18 || Math.abs(dy)>18)) mode = Math.abs(dx)>Math.abs(dy) ? "h" : "v";
-    if(mode!=="h") return;
-    e.preventDefault();   // 仅横向滑选时阻止页面滚动
+    if(!gActive || gsx===null || e.touches.length!==1) return;
+    const dx=e.touches[0].clientX-gsx, dy=e.touches[0].clientY-gsy;
+    if(gMode===null && (Math.abs(dx)>20 || Math.abs(dy)>20)) gMode = Math.abs(dx)>Math.abs(dy) ? "h" : "v";
+    if(gMode!=="h") return;   // 纵向滑动让浏览器滚动
+    e.preventDefault();
+    /* 第一次横向滑动越过阈值 → 无感进入管理模式（不重建、无白屏） */
+    if(!multi) enterMulti();
+    /* 持续连选：手指当前照片即选中（第一次滑动就生效，无需重新滑动） */
     const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
     const ph=el && el.closest ? el.closest(".ph") : null;
-    if(ph && ph.dataset.key && ph.dataset.key!==lastKey){
-      lastKey=ph.dataset.key;
-      if(!selection.has(lastKey)){ selection.add(lastKey); ph.classList.add("sel-on"); refreshBadges(); }
+    if(ph && ph.dataset.key && ph.dataset.key!==gLastKey){
+      gLastKey=ph.dataset.key;
+      if(!selection.has(gLastKey)){ selection.add(gLastKey); ph.classList.add("sel-on"); refreshBadges(); }
     }
   },{passive:false});
-  box.addEventListener("touchend", ()=>{ active=false; sx=null; mode=null; lastKey=null; },{passive:true});
+  v.addEventListener("touchend", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
+  v.addEventListener("touchcancel", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
 })();
 
 /* ============ 照片网格（懒加载分块渲染 + 滚动位置保持） ============ */
@@ -532,11 +514,14 @@ function nativeMove(name, list){
   if(!list || !list.length) return;
   try {
     const uris = JSON.stringify(list.map(m=>m.uri));
-    /* 乐观移入：先从当前网格移除（假装已移走），后台慢慢移动，失败自动恢复 */
+    /* 乐观移入：先从当前网格移除对应 DOM（不重建，其他照片不重新加载），后台慢慢移动，失败自动恢复 */
     const removed=[];
-    for(const m of list){ const idx=phoneMedia.indexOf(m); if(idx>=0){ phoneMedia.splice(idx,1); removed.push(m); } }
+    for(const m of list){
+      const k=itemKey(m);
+      const idx=phoneMedia.indexOf(m); if(idx>=0){ phoneMedia.splice(idx,1); removed.push(m); }
+      const el=phEls.get(k); if(el){ el.remove(); phEls.delete(k); }
+    }
     exitMulti();
-    renderPhotos(true);
     toast("正在移入「"+name+"」"+list.length+" 项…");
     if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ for(const m of removed) phoneMedia.push(m); renderPhotos(true); toast("移动失败"); return; }
     window.__moveCb = resJson => {
@@ -555,6 +540,10 @@ function nativeMove(name, list){
       if(ok>0 && BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
     };
     BRIDGE.moveToAlbumAsync(name, uris, "__moveCb");
+    /* 后台等 MediaStore 更新后再刷新相册计数 */
+    setTimeout(()=>{
+      try{ if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true); if(orgSub==="home") renderHome(); }catch(e){}
+    }, 1500);
   } catch(e){ toast("移动失败："+e); }
 }
 async function removeSelected(){
@@ -825,15 +814,16 @@ function setSlideContent(el, m){
     else if(v.src!==src){ v.src=src; v.controls=true; }
     else v.controls=true;
   } else {
-    /* 缩略图先行（blur 占位，即点即用），原图加载完成后渐显覆盖 */
+    /* 缩略图先行（blur 占位，即点即用），原图加载完成后渐显覆盖；无缩略图时直接显示避免黑屏 */
     const thumb = m.thumb || "";
     let full=el.querySelector("img.full");
     if(!full){
       el.innerHTML=(thumb?'<img class="thumb" src="'+thumb+'" alt="" decoding="async">':'')+'<img class="full" src="" alt="" decoding="async">';
       full=el.querySelector("img.full");
+      if(!thumb) full.classList.add("show");
       full.onload=()=>{ full.classList.add("show"); };
     }
-    if(full.src!==src){ full.classList.remove("show"); full.src=src; }
+    if(full.src!==src){ full.classList.remove("show"); if(!thumb) full.classList.add("show"); full.src=src; }
   }
 }
 function preloadIdx(i){
@@ -877,9 +867,15 @@ function updateViewerChrome(){
         else { moveCurrentTo(c.dataset.alb); }
       });
     });
-    /* 高亮当前照片所属相册（照片自带 albumNames，readMedia 时原生已附带） */
+    /* 高亮当前照片所属相册（照片自带 albumNames；旧数据/异常时 fallback 原生查询） */
     try{
       const names = new Set((m.albumNames||[]).map(n=>String(n)));
+      if(!names.size && BRIDGE && BRIDGE.readAlbumOf && m.uri && m.uri.startsWith("content:")){
+        try{
+          const list=JSON.parse(BRIDGE.readAlbumOf(m.uri)||"[]");
+          list.forEach(a=>names.add(String(a.name)));
+        }catch(e){}
+      }
       if(names.size){
         work.querySelectorAll(".vchip[data-alb]").forEach(c=>{
           if(names.has(c.dataset.alb)) c.classList.add("on");
@@ -1250,8 +1246,44 @@ async function clearStorage(){
   if(tab==="me") renderMe(); else saveState();
 }
 
+/* 小图长按预览：长按照片显示大图，松手取消 */
+let phLongKey=null, phLongT=null, phLongSuppress=false;
+function showPhPreview(m){
+  const p=$("#phPreview");
+  if(!p) return;
+  p.innerHTML='<img src="'+(m.uri||objURL(m))+'" alt="">';
+  p.classList.add("show");
+}
+function hidePhPreview(){ const p=$("#phPreview"); if(p) p.classList.remove("show"); }
+(function(){
+  const box=$("#photos");
+  let sx=0, sy=0;
+  box.addEventListener("touchstart", e=>{
+    if(multi || e.touches.length!==1) return;
+    const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+    const ph=el&&el.closest?el.closest(".ph"):null;
+    if(!ph || !ph.dataset.key) return;
+    phLongKey=ph.dataset.key; sx=e.touches[0].clientX; sy=e.touches[0].clientY; phLongSuppress=false;
+    clearTimeout(phLongT);
+    phLongT=setTimeout(()=>{
+      if(phLongKey===null) return;
+      phLongSuppress=true;
+      const items=visibleMedia();
+      const m=items.find(x=>itemKey(x)===phLongKey);
+      if(m){ showPhPreview(m); vibrate(12); }
+    },420);
+  },{passive:true});
+  box.addEventListener("touchmove", e=>{
+    if(phLongKey===null) return;
+    const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
+    if(Math.abs(dx)>14 || Math.abs(dy)>14){ clearTimeout(phLongT); hidePhPreview(); phLongKey=null; }
+  },{passive:true});
+  box.addEventListener("touchend", ()=>{ clearTimeout(phLongT); hidePhPreview(); phLongKey=null; setTimeout(()=>{ phLongSuppress=false; },50); });
+  box.addEventListener("touchcancel", ()=>{ clearTimeout(phLongT); hidePhPreview(); phLongKey=null; });
+})();
 /* 照片网格点击委托（避免逐项绑定的性能开销） */
 $("#photos").addEventListener("click", e=>{
+  if(phLongSuppress){ return; }
   const ph=e.target.closest ? e.target.closest(".ph") : null;
   if(!ph || !ph.dataset.key) return;
   const key=ph.dataset.key;
