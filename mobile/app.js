@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.0";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.2.1";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -241,9 +241,11 @@ function renderHome(){
     p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
   } else if(BRIDGE){
     const g=document.createElement("div"); g.className="pgalb-grid";
-    phoneAlbums.forEach(a=>{
-      const c=document.createElement("div"); c.className="pgalb";
+    phoneAlbums.forEach((a,ai)=>{
+      const c=document.createElement("div"); c.className="pgalb anim-pop";
+      c.dataset.albumId=a.id;
       c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div style="height:100%"></div>')+'</div><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
+      c.style.animationDelay=(ai*40)+"ms";
       c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
       bindLong(c, ()=>phoneAlbumMenu(a));
       g.appendChild(c);
@@ -331,7 +333,7 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
     if(mode===null && (Math.abs(dx)>18 || Math.abs(dy)>18)) mode = Math.abs(dx)>Math.abs(dy) ? "h" : "v";
     if(mode!=="h") return;
-    e.preventDefault();
+    e.preventDefault();   // 仅横向滑选时阻止页面滚动
     const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
     const ph=el && el.closest ? el.closest(".ph") : null;
     if(ph && ph.dataset.key && ph.dataset.key!==lastKey){
@@ -355,7 +357,9 @@ function buildPhotoEl(m){
   el.innerHTML = '<img loading="lazy" decoding="async" src="'+(m.thumb||m.uri||objURL(m))+'" alt=""><span class="idx"></span>'+(isVideo(m)?'<span class="dur">▶</span>':'');
   if(multi && selection.has(key)){ el.classList.add("sel-on"); el.querySelector(".idx").textContent = [...selection].indexOf(key)+1; }
   if(multi) el.classList.add("multi");
-  el.addEventListener("click", ()=>{ if(multi){ toggleSel(key, el); } else { openViewer(visibleMedia(), itemsIndexOf(m), "normal"); } });
+  /* 入场动画：前 120 项依次浮现，避免大列表动画卡顿 */
+  el.classList.add("anim-pop");
+  el.style.animationDelay = Math.min(phRendered, 120) * 25 + "ms";
   phEls.set(key, el);
   return el;
 }
@@ -423,7 +427,11 @@ function exitMulti(){
   renderPhotos();
   if(orgSub==="photos") updateTitle();
 }
-function updateSelbar(){ $("#selCount").textContent = selection.size + " 项"; }
+function updateSelbar(){
+  const c=$("#selCount");
+  c.textContent = selection.size + " 项";
+  c.classList.remove("bump"); void c.offsetWidth; c.classList.add("bump");
+}
 function updateTitle(){
   if(tab==="me"){ $("#title").textContent="我的"; return; }
   if(orgSub==="home"){ $("#title").textContent="整理"; return; }
@@ -507,8 +515,9 @@ function renderTrash(){
   if(view && prevTop>0) requestAnimationFrame(()=>{ view.scrollTop = prevTop; });
 }
 function trashEl(m){
-  const el=document.createElement("div"); el.className="ph";
+  const el=document.createElement("div"); el.className="ph anim-pop";
   el.innerHTML='<img loading="lazy" decoding="async" src="'+(m.thumb||m.uri||objURL(m))+'" alt="">'+(m.isVideo?'<span class="dur">▶</span>':'');
+  el.style.animationDelay=Math.min(trashRendered,120)*25+"ms";
   el.addEventListener("click", ()=>{ openViewer(trashList, trashList.indexOf(m), "trash"); });
   bindLong(el, ()=>sheetTrashItem(m));
   return el;
@@ -920,6 +929,8 @@ $("#vClose").addEventListener("click", closeViewer);
 async function doTrashCurrent(){
   const m=viewerList[viewerIdx];
   if(!m) return;
+  const cur=vSlots.find(s=>s.idx===viewerIdx);
+  if(cur){ cur.el.classList.add("flyout-up"); await new Promise(r=>setTimeout(r,150)); }
   if(viewerMode==="trash"){
     await permanentDelete(m);
     const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
@@ -1074,6 +1085,14 @@ function renderMe(){
     $("#ignoreVerD").textContent="v"+ig+"（本次不再提示）";
     $("#rowIgnore").addEventListener("click", ()=>{ localStorage.removeItem("pp_ignore_ver"); toast("已清除忽略，下次将正常提示"); renderMe(); });
   }
+  /* 统计数字滚动动画 */
+  document.querySelectorAll("#view-me .stat b").forEach(el=>{
+    const target=parseInt(el.textContent,10)||0;
+    if(target<=0) return;
+    const dur=520, t0=performance.now();
+    const step=(t)=>{ const p=Math.min(1,(t-t0)/dur); el.textContent=Math.round(target*(0.5-0.5*Math.cos(Math.PI*p))); if(p<1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
   if(prevTop>0) requestAnimationFrame(()=>{ view.scrollTop = prevTop; });
 }
 async function clearStorage(){
@@ -1088,6 +1107,18 @@ async function clearStorage(){
   toast("已清理，整理记录已保留");
   if(tab==="me") renderMe(); else saveState();
 }
+
+/* 照片网格点击委托（避免逐项绑定的性能开销） */
+$("#photos").addEventListener("click", e=>{
+  const ph=e.target.closest ? e.target.closest(".ph") : null;
+  if(!ph || !ph.dataset.key) return;
+  const key=ph.dataset.key;
+  const items=visibleMedia();
+  const idx=items.findIndex(m=>itemKey(m)===key);
+  if(idx<0) return;
+  if(multi){ toggleSel(key, ph); }
+  else { openViewer(items, idx, "normal"); }
+});
 
 /* ============ 导航：整理 / 我的 ============ */
 function goHome(){
