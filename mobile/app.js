@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.2.0 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.1";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.2";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -204,7 +204,7 @@ function readPhoneMedia(id, cb){
       let items=[]; try{ items=JSON.parse(json); }catch(e){}
       cb && cb(items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri)));
     };
-    BRIDGE.readUnfiledAsync("__mediaCb");
+    BRIDGE.readUnfiledAsync(JSON.stringify([...hiddenAlbums]), "__mediaCb");
     return;
   }
   const c=phoneMediaCache.get(id);
@@ -306,10 +306,16 @@ function renderHome(){
   const box=$("#albums");
   box.className="";
   box.innerHTML="";
-  box.appendChild(h("手机相册"));
+  const titleRow=h("手机相册");
+  const hideBtn=document.createElement("button");
+  hideBtn.className="hide-btn";
+  hideBtn.textContent="隐藏相册"+(hiddenAlbums.size?(" · "+hiddenAlbums.size):"");
+  hideBtn.addEventListener("click", manageHiddenAlbums);
+  titleRow.appendChild(hideBtn);
+  box.appendChild(titleRow);
   if(BRIDGE && BRIDGE.readUnfiledAsync){
     const uf=document.createElement("div"); uf.className="tool-card";
-    uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理</div><div class="d">没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
+    uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理</div><div class="d">'+(hiddenAlbums.size?('隐藏相册 '+hiddenAlbums.size+' 个 · '):'')+'没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
     uf.addEventListener("click", ()=>{ openPhoneAlbum("unfiled","未整理"); });
     box.appendChild(uf);
   }
@@ -343,6 +349,17 @@ function renderHome(){
   const nb=document.createElement("button"); nb.className="big-btn"; nb.textContent="＋ 新建相册";
   nb.addEventListener("click", ()=>{ if(!BRIDGE){ toast("请在 App 中使用"); return; } promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } }); });
   box.appendChild(nb);
+}
+/* 隐藏相册管理：勾选隐藏的相册照片计入“未整理” */
+function manageHiddenAlbums(){
+  if(!phoneAlbums.length){ toast("暂无可管理的相册"); return; }
+  const opts = phoneAlbums.map(a=>({
+    ic: hiddenAlbums.has(a.id) ? "✅" : "⬜",
+    t: a.name + (hiddenAlbums.has(a.id) ? "（已隐藏→未整理）" : ""),
+    f: ()=>{ if(hiddenAlbums.has(a.id)) hiddenAlbums.delete(a.id); else hiddenAlbums.add(a.id); saveHidden(); }
+  }));
+  opts.push({ic:"✔️",t:"完成",f:()=>{ renderHome(); toast(hiddenAlbums.size?("已隐藏 "+hiddenAlbums.size+" 个相册，照片计入未整理"):"未隐藏任何相册"); }});
+  sheet(opts, "隐藏相册（照片计入未整理）");
 }
 /* 手机相册管理：删除相册（询问是否删除相册内照片）/ 刷新 */
 function phoneAlbumMenu(a){
@@ -431,7 +448,7 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
     if(nc!==gridCols){
       gridCols=nc;
       try{ localStorage.setItem("pp_grid_cols", String(gridCols)); }catch(e){}
-      applyGridCols();
+      applyGridCols(true);
       vibrate(8);
     }
   },{passive:false});
@@ -441,7 +458,27 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
 
 /* ============ 照片网格（一次性全量渲染 + 月份分隔 + 滚动位置保持） ============ */
 let phEls = new Map();
-function applyGridCols(){ const box=$("#photos"); if(box && box.className==="ph-grid") box.style.gridTemplateColumns="repeat("+gridCols+",1fr)"; }
+function applyGridCols(animate){
+  const box=$("#photos");
+  if(!box || box.className!=="ph-grid") return;
+  const setCols=()=>{ box.style.gridTemplateColumns="repeat("+gridCols+",1fr)"; };
+  if(!animate){ setCols(); return; }
+  /* FLIP：记录旧位置→改列数→位移过渡到新位置，捏合平滑不顿挫 */
+  const els=[...box.children];
+  const first=els.map(el=>{ const r=el.getBoundingClientRect(); return {l:r.left,t:r.top}; });
+  setCols();
+  requestAnimationFrame(()=>{
+    els.forEach((el,i)=>{
+      const r=el.getBoundingClientRect();
+      const dx=first[i].l-r.left, dy=first[i].t-r.top;
+      if(dx||dy){ el.style.transition="none"; el.style.transform="translate("+dx+"px,"+dy+"px)"; }
+    });
+    requestAnimationFrame(()=>{
+      els.forEach(el=>{ el.style.transition="transform .32s var(--ease)"; el.style.transform=""; });
+      setTimeout(()=>els.forEach(el=>{ el.style.transition=""; }),360);
+    });
+  });
+}
 function monthLabelOf(m){
   const d = m && m.dateAdded ? new Date(m.dateAdded*1000) : null;
   if(!d || isNaN(d.getTime())) return null;
@@ -602,12 +639,12 @@ function nativeMove(name, list){
 async function removeSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
-  /* 移入回收站无需确认（可恢复，系统文件不删除）；删除后立即从网格移除，立马生效 */
+  /* 移入回收站无需确认（可恢复）；一次性全部消失（一起飞走再移除，不是一张张变少） */
   if(phoneAlbum!==null){
-    for(const m of list){
-      await trashPhone(m);
-      const el=phEls.get(itemKey(m)); if(el){ el.remove(); phEls.delete(itemKey(m)); }
-    }
+    for(const m of list){ await trashPhone(m); }
+    list.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el) el.classList.add("flyout-up"); });
+    await new Promise(r=>setTimeout(r,150));
+    list.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el){ el.remove(); phEls.delete(itemKey(m)); } });
     exitMulti();
     await refreshTrash();
     refreshPhoneAlbums();
@@ -630,6 +667,8 @@ async function removeSelected(){
 /* ============ 回收站（App 内软删除：系统文件不动，清空回收站时才真正删除） ============ */
 let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册中过滤
 let pendingMoves = new Set();  // 已复制到目标但源照片待系统确认删除的 uri（“完成整理”统一处理）
+let hiddenAlbums = new Set(JSON.parse(localStorage.getItem("pp_hidden")||"[]"));  // 隐藏相册 id → 照片计入“未整理”
+function saveHidden(){ try{ localStorage.setItem("pp_hidden", JSON.stringify([...hiddenAlbums])); }catch(e){} }
 async function refreshTrash(){
   const all = await storeGetAll("trash");
   appTrash = all.filter(t=>!t.fromPhone);
@@ -1424,6 +1463,8 @@ $("#btn-add").addEventListener("click", ()=>{
   promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v); renderHome(); toast("已创建相册「"+v+"」"); } });
 });
 $("#trashCard").addEventListener("click", openTrashView);
+/* 回收站卡片右侧小方块：一键清空回收站 */
+$("#trashClear").addEventListener("click", e=>{ e.stopPropagation(); emptyTrash(); });
 $("#selDone").addEventListener("click", exitMulti);
 /* “完成整理”：一次性批量确认删除已移动照片的源文件 */
 function updateFabDone(){
