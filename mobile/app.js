@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.7";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.8";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -196,7 +196,7 @@ function refreshPhoneAlbums(force){
     for(const key of [...phoneMediaCache.keys()]){ if(!ids.has(key)) phoneMediaCache.delete(key); }
   }catch(e){ phoneAlbums=[]; }
 }
-const PHONE_DB_TTL = 7*24*3600*1000;   // IndexedDB 持久缓存 7 天，命中即秒开，后台静默刷新
+const PHONE_DB_TTL = 30*24*3600*1000;   // IndexedDB 持久缓存 7 天，命中即秒开，后台静默刷新
 function readPhoneMedia(id, cb){
   if(id==="unfiled"){
     if(!BRIDGE || !BRIDGE.readUnfiledAsync){ cb && cb([]); return; }
@@ -647,6 +647,10 @@ function itemsIndexOf(m){ return visibleMedia().indexOf(m); }
    so re-entering an album is instant (no content:// requests). */
 let phItems = [];
 let phScrollBound = false;
+let phDirty = false;
+let phGridAlbum = null;
+let phWarmTimer = null;
+let phWarmIdx = 0;
 function bindPhScroll(){
   if(phScrollBound) return;
   phScrollBound = true;
@@ -695,8 +699,34 @@ function maybeRenderMore(){
     const sr=sentinel.getBoundingClientRect();
     if(sr.top > vr.bottom + 320) return;
     renderChunk();
-    if(phRendered>=phItems.length) return;
+    if(phRendered>=phItems.length){ warmThumbs(); return; }
   }
+}
+function markPhDirty(){ phDirty=true; }
+/* 后台温缩略图：将尚未转化的 content:// 缩略图逐批转成 base64，重进相册 100% 即时 */
+function warmThumbs(){
+  if(phWarmTimer) return;
+  phWarmTimer=setTimeout(()=>{
+    phWarmTimer=null;
+    const items=phItems;
+    if(!items) return;
+    let done=0;
+    for(let i=phWarmIdx;i<items.length && done<16;i++){
+      const m=items[i];
+      if(!m){ phWarmIdx=i+1; continue; }
+      if(m.thumb && m.thumb.indexOf("content:")===0 && !m._b64){
+        phWarmIdx=i+1;
+        const im=new Image();
+        im.onload=()=>thumbToB64(m, im);
+        im.onerror=()=>{};
+        im.src=m.thumb;
+        done++;
+      } else {
+        phWarmIdx=i+1;
+      }
+    }
+    if(phWarmIdx < items.length) warmThumbs();
+  }, 350);
 }
 function renderMoreTo(px){
   const view=document.getElementById("view-photos");
@@ -714,6 +744,16 @@ function renderPhotos(keepScroll){
   const items = visibleMedia();
   const view=document.getElementById("view-photos");
   const prevTop = keepScroll ? (view ? view.scrollTop : 0) : 0;
+  const ctx = phoneAlbum!==null ? "p:"+phoneAlbum : (currentAlbum===null?"all":"a:"+currentAlbum);
+  /* 内容未变且已渲染：直接保留网格，不重建、不重新加载 */
+  if(!keepScroll && !phDirty && phGridAlbum===ctx && phItems && phItems.length===items.length && phRendered>=phItems.length && phEls.size>0){
+    phItems = items;
+    return;
+  }
+  phGridAlbum = ctx;
+  phDirty = false;
+  phWarmIdx = 0;
+  if(phWarmTimer){ clearTimeout(phWarmTimer); phWarmTimer=null; }
   phEls = new Map();
   phItems = items;
   phRendered = 0;
@@ -938,6 +978,7 @@ async function trashPhone(m){
   await storePut("trash", rec);
   trashedUris.add(m.uri);
   const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
+  markPhDirty();
   lastTrashed={type:"phone", uri:m.uri, id:rec.id};
   recordStats("trash",1);
 }
@@ -1082,6 +1123,9 @@ function closeViewer(){
   document.body.style.overflow="";
   clearTimeout(longT); g=null;
   vSlots.forEach(s=>{ s.el.remove(); }); vSlots=[];
+  /* 普通模式且网格未变：保留当前网格不重建，返回不卡顿 */
+  if(viewerMode==="normal" && orgSub==="photos" && !phDirty){ return; }
+  phDirty=false;
   refreshActiveView();
 }
 function setTrack(dx, dy, sc, animate){
@@ -1163,8 +1207,6 @@ function updateViewerChrome(){
     work.innerHTML='<div class="vw-albums">'+chips+'</div>'+
       '<div class="vw-btns">'+
       '<button id="vUndo" style="'+(lastTrashed?'':'display:none')+'">↩ 撤销</button>'+
-      '<button id="vTrash">🗑 回收</button>'+
-      '<button id="vClose2">✕ 关闭</button>'+
       '</div>';
     work.querySelectorAll(".vchip").forEach(c=>{
       c.addEventListener("click", ()=>{
@@ -1189,8 +1231,6 @@ function updateViewerChrome(){
       }
     }catch(e){}
     $("#vUndo").addEventListener("click", ()=>{ undoTrash(); });
-    $("#vTrash").addEventListener("click", ()=>{ doTrashCurrent(); });
-    $("#vClose2").addEventListener("click", closeViewer);
   }
 }
 /* 大图浏览：把当前照片移出所属相册（移到 PicaPhoto 整理区） */
@@ -1201,6 +1241,7 @@ function moveOutCurrent(name){
   /* 乐观移出 */
   const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
+  markPhDirty();
   afterViewerRemove();
   toast("正在移出「"+name+"」…");
   if(!BRIDGE || !BRIDGE.moveOutAlbumAsync){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移出失败"); return; }
@@ -1635,7 +1676,11 @@ function showOrg(){
   const v = orgSub==="photos" ? "view-photos" : (orgSub==="trash" ? "view-trash" : "view-home");
   $("#"+v).classList.add("active");
   if(orgSub==="home"){ renderHome(); }
-  if(orgSub==="photos"){ renderPhotos(); }
+  if(orgSub==="photos"){
+    const ctx = phoneAlbum!==null ? "p:"+phoneAlbum : (currentAlbum===null?"all":"a:"+currentAlbum);
+    if(phDirty || phGridAlbum!==ctx || !phEls.size){ renderPhotos(); }
+    else { phDirty=false; }
+  }
   if(orgSub==="trash"){ refreshTrash().then(renderTrash); }
   updateFabDone();
   updateTitle();
@@ -1795,6 +1840,11 @@ $("#updIgnore").addEventListener("click", ()=>{
 function saveState(){ refreshActiveView(); }
 async function init(){
   try{ await openDB(); }catch(e){ toast("存储不可用"); }
+  /* 启动时将 IndexedDB 相册缓存预装进内存：再次点开相册即时显示、无骨架屏 */
+  try{
+    const rows=await storeGetAll("phonecache");
+    rows.forEach(r=>{ if(r && r.albumId && r.items && r.items.length) phoneMediaCache.set(r.albumId,{t:r.t||Date.now(), items:r.items}); });
+  }catch(e){}
   media=await storeGetAll("media");
   albums=await storeGetAll("albums");
   await loadStats();
