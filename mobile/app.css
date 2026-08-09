@@ -122,6 +122,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .pgalb{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:transform .14s var(--ease);position:relative}
 .pgalb:active{transform:scale(.93)}
 .pgalb .cover{width:100%;aspect-ratio:1;background:var(--accent-soft);position:relative}
+.pgalb .cover-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800;color:var(--accent);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,transparent),color-mix(in srgb,var(--accent) 4%,transparent))}
 .pgalb .cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s var(--ease)}
 .pgalb .name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:5px 6px 2px}
 .pgalb .cnt{font-size:10px;color:var(--sub);padding:0 6px 6px}
@@ -179,7 +180,7 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 /* ============ 大图整理 ============ */
 #viewer{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;flex-direction:column;touch-action:none;overflow:hidden}
 #viewer.open{display:flex;animation:viewerIn .28s var(--ease)}
-#vPreview{position:relative;flex:1;background:#000;overflow:hidden;min-height:0}
+#vPreview{position:relative;flex:1;background:#0d0e12;overflow:hidden;min-height:0}
 #vTrack{position:absolute;inset:0;will-change:transform;transform:translate(0,0)}
 #viewer .slide{position:absolute;inset:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
   transform:translateX(0);transition:none;will-change:transform}
@@ -289,3 +290,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .vchip.on::after{content:"✓";margin-left:2px;font-weight:800}
 .vchip.on:active{background:color-mix(in srgb,var(--danger) 16%,var(--card));color:var(--danger);border-color:var(--danger)}
 .vchip.on:active::after{content:"移出";font-size:11px}
+
+/* ============ 小图长按预览 ============ */
+#phPreview{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;pointer-events:none;animation:fadeIn .15s var(--ease)}
+#phPreview.show{display:flex}
+#phPreview img{max-width:92%;max-height:82%;border-radius:12px;object-fit:contain;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:popIn .2s var(--spring)}
