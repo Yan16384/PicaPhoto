@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.6";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.3.7";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -270,7 +270,7 @@ function openPhoneAlbum(id, name){
   phoneAlbum = id; currentAlbum = null; orgSub = "photos";
   exitMulti();
   phoneMedia = [];
-  /* ?????????????????????????????????????? */
+  /* 打开相册从顶部开始（虚拟化渲染以可视区为准） */
   try{ const v=document.getElementById("view-photos"); if(v) v.scrollTop=0; }catch(e){}
   showOrg();
   /* 有缓存立即显示（秒开）；无缓存显示骨架屏（马上有画面，数据到后填充） */
@@ -441,31 +441,39 @@ function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum==
 /* 照片网格手势：横向滑动无感进入管理模式并持续连选（第一次滑动即选中路径上的照片，无顿挫） */
 (function(){
   const v=$("#view-photos");
-  let gsx=null, gsy=null, gActive=false, gMode=null, gLastKey=null;
+let gsx=null, gsy=null, gpx=null, gpy=null, gActive=false, gMode=null, gToggled=null;
+  const STEP=18;   // 沿手指路径密集采样间距，避免快速横滑漏选
+  function tapCell(x, y){
+    const el=document.elementFromPoint(x, y);
+    const ph=el && el.closest ? el.closest(".ph") : null;
+    if(!ph || !ph.dataset.key || !gToggled) return;
+    const key=ph.dataset.key;
+    if(gToggled.has(key)) return;
+    gToggled.add(key);
+    if(selection.has(key)){ selection.delete(key); ph.classList.remove("sel-on"); const b=ph.querySelector(".idx"); if(b) b.textContent=""; }
+    else { selection.add(key); ph.classList.add("sel-on"); }
+    refreshBadges();
+  }
   v.addEventListener("touchstart", e=>{
     if(e.touches.length!==1){ gActive=false; gsx=null; gMode=null; return; }
-    gsx=e.touches[0].clientX; gsy=e.touches[0].clientY; gActive=true; gMode=null; gLastKey=null;
+    gsx=gpx=e.touches[0].clientX; gsy=gpy=e.touches[0].clientY; gActive=true; gMode=null; gToggled=new Set();
   },{passive:true});
   v.addEventListener("touchmove", e=>{
-    if(!gActive || gsx===null || e.touches.length!==1) return;
-    const dx=e.touches[0].clientX-gsx, dy=e.touches[0].clientY-gsy;
+    if(!gActive || gpx===null || e.touches.length!==1) return;
+    const cx=e.touches[0].clientX, cy=e.touches[0].clientY;
+    const dx=cx-gsx, dy=cy-gsy;
     if(gMode===null && (Math.abs(dx)>20 || Math.abs(dy)>20)) gMode = Math.abs(dx)>Math.abs(dy) ? "h" : "v";
-    if(gMode!=="h") return;   // 纵向滑动让浏览器滚动
+    if(gMode!=="h") return;
     e.preventDefault();
-    /* 第一次横向滑动越过阈值 → 无感进入管理模式（不重建、无白屏） */
     if(!multi) enterMulti();
-    /* 持续连选：手指当前照片即选中（第一次滑动就生效，无需重新滑动） */
-    const el=document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-    const ph=el && el.closest ? el.closest(".ph") : null;
-    if(ph && ph.dataset.key && ph.dataset.key!==gLastKey){
-      gLastKey=ph.dataset.key;
-      if(selection.has(gLastKey)){ selection.delete(gLastKey); ph.classList.remove("sel-on"); }
-      else { selection.add(gLastKey); ph.classList.add("sel-on"); }
-      refreshBadges();
-    }
+    /* 沿上一个触点到当前点的线段密集采样，一次滑动不漏选任何格子 */
+    const dist=Math.hypot(cx-gpx, cy-gpy);
+    const steps=Math.max(1, Math.round(dist/STEP));
+    for(let s=1;s<=steps;s++){ tapCell(gpx+(cx-gpx)*s/steps, gpy+(cy-gpy)*s/steps); }
+    gpx=cx; gpy=cy;
   },{passive:false});
-  v.addEventListener("touchend", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
-  v.addEventListener("touchcancel", ()=>{ gActive=false; gsx=null; gMode=null; gLastKey=null; },{passive:true});
+  v.addEventListener("touchend", ()=>{ gActive=false; gsx=gpx=null; gsy=gpy=null; gMode=null; gToggled=null; },{passive:true});
+  v.addEventListener("touchcancel", ()=>{ gActive=false; gsx=gpx=null; gsy=gpy=null; gMode=null; gToggled=null; },{passive:true});
 })();
 /* 小图网格：双指捏合调整排列（张开=变大最多横排2，合拢=变小最少横排6） */
 (function(){
@@ -553,6 +561,7 @@ function monthLabelOf(m){
 }
 const VP_PLACEHOLDER = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#262a33"/><circle cx="120" cy="120" r="42" fill="rgba(255,255,255,.14)"/><path d="M104 96v48l40-24z" fill="#fff"/></svg>');
 function imgSrcOf(m){ return isVideo(m) ? ((m.thumb && m.thumb.indexOf("data:")===0) ? m.thumb : VP_PLACEHOLDER) : (m.thumb||m.uri||objURL(m)); }
+/* 视频真实缩略图：可见时后台取帧，替换占位并缓存到 m.thumb */
 /* Video real frame: lazily generated when visible (concurrency capped), persisted as dataURL */
 let vtPending = new Map();
 let vtObserver = null;
@@ -632,6 +641,7 @@ function buildPhotoEl(m, idx){
   return el;
 }
 function itemsIndexOf(m){ return visibleMedia().indexOf(m); }
+/* 一次性渲染全部照片（含月份分隔占位格），不再随滚动分块加载 */
 /* Virtualized chunked rendering: only render near the viewport (72/chunk),
    scroll to the sentinel renders the next chunk; thumbnails persist as dataURL
    so re-entering an album is instant (no content:// requests). */
@@ -1686,7 +1696,7 @@ $("#fabDone").addEventListener("click", ()=>{
   const uris=[...pendingMoves];
   if(!uris.length) return;
   requestRealDelete(uris);   // 系统一次性确认，确认后 __deleted 清理
-  toast("正在请求删除 "+uris.length+" 张源照片");
+  toast("需系统确认删除 "+uris.length+" 张移动后的源照片副本（系统允许即可）");
 });
 $("#selAll").addEventListener("click", selectAll);
 $("#selMove").addEventListener("click", moveSelected);
@@ -1698,7 +1708,10 @@ function renderMultiAlbums(){
   add.addEventListener("click", ()=>{ promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>moveSelTo(v)); } }); });
   box.appendChild(add);
   albumTargets().forEach(a=>{
-    const c=document.createElement("button"); c.className="mchip"; c.textContent="📁 "+a.name;
+    const c=document.createElement("button"); c.className="mchip";
+    const hidden = a.id && hiddenAlbums.has(a.id);
+    if(hidden) c.classList.add("hide");
+    c.textContent=(hidden?"\uD83D\uDD12 ":"\uD83D\uDCC1 ")+a.name;
     c.addEventListener("click", ()=>{ moveSelTo(a.name); });
     box.appendChild(c);
   });
