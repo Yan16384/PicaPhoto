@@ -181,8 +181,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #viewer{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;flex-direction:column;touch-action:none;overflow:hidden}
 #viewer.open{display:flex;animation:viewerIn .28s var(--ease)}
 #vPreview{position:relative;flex:1;background:#0d0e12;overflow:hidden;min-height:0}
-#vTrack{position:absolute;inset:0;will-change:transform;transform:translate(0,0)}
-#viewer .slide{position:absolute;inset:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
+#vTrack{position:absolute;inset:calc(var(--safe-t) + 42px) 0 0;will-change:transform;transform:translate(0,0)}
+#viewer .slide{position:absolute;top:calc(var(--safe-t) + 42px);left:0;right:0;bottom:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
   transform:translateX(0);transition:none;will-change:transform}
 #viewer .slide.peek{transform:translateX(0) scale(1.05)}
 #viewer .slide.zoomed img{transform:scale(2.2);transition:transform .25s var(--ease)}
@@ -192,20 +192,24 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #viewer .slide img.full.show{opacity:1}
 #viewer .slide img.thumb{position:absolute;inset:0;filter:blur(4px) brightness(.92);transform:scale(1.03)}
 #viewer video{pointer-events:auto}
-.v-count{position:absolute;top:calc(var(--safe-t) + 10px);left:14px;z-index:6;color:#fff;font-size:13px;font-weight:600;
+.v-count{position:absolute;top:calc(var(--safe-t) + 50px);left:14px;z-index:6;color:#fff;font-size:13px;font-weight:600;
   background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;animation:fadeIn .3s var(--ease) both}
-.v-close{position:absolute;top:calc(var(--safe-t) + 8px);right:12px;z-index:6;width:34px;height:34px;border-radius:50%;
+.v-close{position:absolute;top:calc(var(--safe-t) + 48px);right:12px;z-index:6;width:34px;height:34px;border-radius:50%;
   background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;transition:transform .16s var(--spring),background .2s}
 .v-close:active{transform:scale(.86) rotate(90deg)}
-#vHint{position:absolute;top:calc(var(--safe-t) + 52px);left:50%;transform:translateX(-50%);z-index:7;
+#vHint{position:absolute;top:calc(var(--safe-t) + 92px);left:50%;transform:translateX(-50%);z-index:7;
   color:#fff;font-size:12px;background:rgba(0,0,0,.45);padding:5px 12px;border-radius:14px;opacity:0;
   transition:opacity .2s;white-space:nowrap}
 #vHint.show{opacity:1}
-#vTrashZone{position:absolute;top:0;left:0;right:0;z-index:8;display:flex;flex-direction:column;align-items:center;gap:2px;
-  padding:calc(var(--safe-t) + 10px) 0;background:rgba(229,69,69,.94);color:#fff;font-size:14px;font-weight:600;
-  transform:translateY(-100%);transition:transform .22s var(--ease)}
-#vTrashZone.show{transform:translateY(0)}
-#vTrashZone .ic{font-size:26px;animation:bounce .5s var(--spring) infinite}
+/* 顶部常驻回收站 dock：上滑照片到此处回收 */
+#vTrashZone{position:absolute;top:0;left:0;right:0;z-index:8;height:calc(var(--safe-t) + 42px);padding-top:var(--safe-t);
+  display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;color:#fff;
+  background:rgba(0,0,0,.38);font-size:13px;font-weight:600;
+  transition:background .2s var(--ease),height .2s var(--ease);box-shadow:0 3px 12px rgba(0,0,0,.2)}
+#vTrashZone.show{background:rgba(229,69,69,.95);height:calc(var(--safe-t) + 58px)}
+#vTrashZone .ic{font-size:20px}
+#vTrashZone .txt{font-size:11px;opacity:.95}
+#vTrashZone:not(.show) .txt{opacity:.65}
 #vWork{flex:none;max-height:38%;overflow-y:auto;background:color-mix(in srgb,var(--card) 96%,transparent);
   backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:10px 12px calc(var(--safe-b) + 12px)}
 .vw-albums{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -305,3 +309,21 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 /* 月份分隔占位格（占一个照片位，标注月份分界） */
 .ph-month{display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 10%,var(--card));
   border:1px dashed var(--line);color:var(--accent);font-size:13px;font-weight:700;letter-spacing:1px}
+
+/* ============ 大图相册位置：下部 / 左部 / 右部 ============ */
+#viewer{flex-direction:column}
+#viewer[data-vwork="left"],#viewer[data-vwork="right"]{flex-direction:row}
+#viewer[data-vwork="left"] #vWork,#viewer[data-vwork="right"] #vWork{width:96px;max-height:none;overflow-y:auto;border-top:none;padding:10px 8px calc(var(--safe-b) + 10px)}
+#viewer[data-vwork="left"] #vWork{border-right:1px solid var(--line)}
+#viewer[data-vwork="right"] #vWork{border-left:1px solid var(--line)}
+#viewer[data-vwork="left"] .vw-albums,#viewer[data-vwork="right"] .vw-albums{flex-direction:column;overflow-y:auto;overflow-x:hidden;padding:2px 0 8px}
+#viewer[data-vwork="left"] .vw-btns,#viewer[data-vwork="right"] .vw-btns{flex-direction:column;gap:6px}
+#viewer[data-vwork="left"] .vchip,#viewer[data-vwork="right"] .vchip{width:100%;justify-content:center;height:30px;padding:0 6px;font-size:12px}
+#viewer[data-vwork="left"] .slide{justify-content:flex-start}
+#viewer[data-vwork="right"] .slide{justify-content:flex-end}
+/* 下部：一行放不下自动两行，两行仍放不下横向滑动 */
+#viewer[data-vwork="bottom"] .vw-albums{flex-wrap:wrap;max-height:76px;overflow-y:hidden;overflow-x:auto}
+/* 上滑删除：当前照片飞走层 */
+.ghost-fly{position:fixed;left:0;right:0;top:0;bottom:0;width:100%;height:100%;object-fit:contain;z-index:999;pointer-events:none;
+  transition:transform .18s var(--ease),opacity .18s var(--ease)}
+.ghost-fly.fly{transform:translateY(-170px) scale(.9);opacity:0}
