@@ -210,8 +210,9 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:10px 12px calc(var(--safe-b) + 12px)}
 .vw-albums{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .vw-albums::-webkit-scrollbar{display:none}
-.vchip{flex:none;height:34px;padding:0 14px;border-radius:17px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;
-  display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring)}
+/* 默认弱化样式，仅当前照片所属相册（.on）才醒目高亮，避免“全部高亮” */
+.vchip{flex:none;height:34px;padding:0 14px;border-radius:17px;background:var(--bg);color:var(--sub);font-size:13px;font-weight:600;
+  border:1px solid var(--line);display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring),background .18s,color .18s,border-color .18s}
 .vchip:active{transform:scale(.9)}
 .vchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
 .vw-btns{display:flex;gap:10px}
@@ -286,9 +287,9 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .bump{animation:bounce .3s var(--spring)}
 
 /* 大图浏览：当前照片所属相册高亮 */
-.vchip.on{background:color-mix(in srgb,var(--green) 16%,var(--card));color:var(--green);border:1.5px solid var(--green)}
-.vchip.on::after{content:"✓";margin-left:2px;font-weight:800}
-.vchip.on:active{background:color-mix(in srgb,var(--danger) 16%,var(--card));color:var(--danger);border-color:var(--danger)}
+.vchip.on{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
+.vchip.on::after{content:"✓";margin-left:2px;font-weight:900}
+.vchip.on:active{background:var(--danger);border-color:var(--danger)}
 .vchip.on:active::after{content:"移出";font-size:11px}
 
 /* ============ 小图长按预览 ============ */
