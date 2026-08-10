@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.4.1";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.4.2";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -403,7 +403,7 @@ function manageHiddenAlbums(){
 }
 /* 手机相册管理：删除相册（询问是否删除相册内照片）/ 刷新 */
 function phoneAlbumMenu(a){
-  const isOwn = createdAlbums().includes(a.name);
+  const isOwn = (a.pica === true) || createdAlbums().includes(a.name);
   const opts=[];
   if(isOwn){ opts.push({ic:"✏️",t:"重命名",f:()=>{
     promptInput("重命名相册", a.name, async v=>{ if(v && v.trim() && v.trim()!==a.name){ renameAlbum(a, v.trim()); } });
@@ -426,7 +426,7 @@ function renameAlbum(a, newName){
       refreshPhoneAlbums(true);
       setTimeout(()=>{ renderHome(); }, 300);
     };
-    BRIDGE.renameAlbumAsync(a.name, newName, "__renameCb");
+    BRIDGE.renameAlbumAsync(a.id, a.name, newName, "__renameCb");
   }catch(e){ toast("重命名失败："+e); }
 }
 let pendingDelAlbumName = null;
@@ -577,8 +577,8 @@ function applyGridCols(animate){
       if(dx||dy){ el.style.transition="none"; el.style.transform="translate("+dx+"px,"+dy+"px)"; }
     });
     requestAnimationFrame(()=>{
-      visible.forEach(({el})=>{ el.style.transition="transform .32s var(--ease)"; el.style.transform=""; });
-      setTimeout(()=>visible.forEach(({el})=>{ el.style.transition=""; }),360);
+      visible.forEach(({el})=>{ el.style.transition="transform .18s var(--ease)"; el.style.transform=""; });
+      setTimeout(()=>visible.forEach(({el})=>{ el.style.transition=""; }),220);
     });
   });
 }
@@ -1172,7 +1172,7 @@ function closeViewer(){
 }
 function setTrack(dx, dy, sc, animate){
   const t=$("#vTrack");
-  t.style.transition = animate ? "transform .32s cubic-bezier(.2,.8,.2,1)" : "none";
+  t.style.transition = animate ? "transform .22s cubic-bezier(.2,.8,.2,1)" : "none";
   t.style.transform = "translate(calc("+(-viewerIdx*100)+"% + "+dx+"px), "+dy+"px) scale("+sc+")";
 }
 function clearZoomAll(){ vSlots.forEach(s=>s.el.classList.remove("zoomed","peek")); }
