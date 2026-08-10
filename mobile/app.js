@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 v1.3.6 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.4.0";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.4.1";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -403,8 +403,31 @@ function manageHiddenAlbums(){
 }
 /* 手机相册管理：删除相册（询问是否删除相册内照片）/ 刷新 */
 function phoneAlbumMenu(a){
-  sheet([{ic:"🗑️",t:"删除相册",f:()=>confirmDeletePhoneAlbum(a)},
-          {ic:"⟳",t:"刷新列表",f:()=>{ refreshPhoneAlbums(true); renderHome(); toast("已刷新"); }}],"管理相册");
+  const isOwn = createdAlbums().includes(a.name);
+  const opts=[];
+  if(isOwn){ opts.push({ic:"✏️",t:"重命名",f:()=>{
+    promptInput("重命名相册", a.name, async v=>{ if(v && v.trim() && v.trim()!==a.name){ renameAlbum(a, v.trim()); } });
+  }}); }
+  opts.push({ic:"🗑️",t:"删除相册",f:()=>confirmDeletePhoneAlbum(a)});
+  opts.push({ic:"⟳",t:"刷新列表",f:()=>{ refreshPhoneAlbums(true); renderHome(); toast("已刷新"); }});
+  sheet(opts,"管理相册");
+}
+function renameAlbum(a, newName){
+  if(!BRIDGE || !BRIDGE.renameAlbumAsync){ toast("该版本不支持重命名"); return; }
+  try{
+    window.__renameCb = okJson => {
+      let ok=false; try{ ok = JSON.parse(okJson)===true; }catch(e){}
+      if(ok){
+        const list=createdAlbums();
+        const i=list.indexOf(a.name); if(i>=0) list[i]=newName;
+        localStorage.setItem("pp_created", JSON.stringify(list));
+        toast("已重命名为「"+newName+"」");
+      } else { toast("重命名失败，请重试"); }
+      refreshPhoneAlbums(true);
+      setTimeout(()=>{ renderHome(); }, 300);
+    };
+    BRIDGE.renameAlbumAsync(a.name, newName, "__renameCb");
+  }catch(e){ toast("重命名失败："+e); }
 }
 let pendingDelAlbumName = null;
 function confirmDeletePhoneAlbum(a){
@@ -517,10 +540,10 @@ function thumbToB64(m, img){
   m._b64 = true;
   try{
     const c=document.createElement("canvas");
-    c.width=160; c.height=160;
+    c.width=72; c.height=72;
     const ctx=c.getContext("2d");
-    ctx.drawImage(img,0,0,160,160);
-    const url=c.toDataURL("image/jpeg",0.72);
+    ctx.drawImage(img,0,0,72,72);
+    const url=c.toDataURL("image/jpeg",0.5);
     if(url && url.length>200){ m.thumb=url; scheduleCacheFlush(); }
   }catch(e){}
 }
@@ -533,7 +556,7 @@ function scheduleCacheFlush(){
         const c=phoneMediaCache.get(phoneAlbum); if(c) c.items=phoneMedia;
       }
     }catch(e){}
-  },900);
+  },250);
 }
 function applyGridCols(animate){
   const box=$("#photos");
@@ -729,7 +752,7 @@ function warmThumbs(){
     const items=phItems;
     if(!items) return;
     let done=0;
-    for(let i=phWarmIdx;i<items.length && done<16;i++){
+    for(let i=phWarmIdx;i<items.length && done<24;i++){
       const m=items[i];
       if(!m){ phWarmIdx=i+1; continue; }
       if(m.thumb && m.thumb.indexOf("content:")===0 && !m._b64){
@@ -744,7 +767,7 @@ function warmThumbs(){
       }
     }
     if(phWarmIdx < items.length) warmThumbs();
-  }, 350);
+  }, 120);
 }
 function renderMoreTo(px){
   const view=document.getElementById("view-photos");
@@ -795,6 +818,7 @@ function renderPhotos(keepScroll){
   bindPhScroll();
   renderChunk();
   startAutoFill();
+  warmThumbs();
   /* non-keepScroll: start from top (view may have been hidden so reset must happen here) */
   if(!keepScroll && view){ view.scrollTop = 0; }
   /* top up if first screen is not full */
@@ -1841,6 +1865,8 @@ $("#updIgnore").addEventListener("click", ()=>{
 function saveState(){ refreshActiveView(); }
 async function init(){
   try{ await openDB(); }catch(e){ toast("存储不可用"); }
+  /* request persistent storage so the system does not clear IndexedDB cache in background/low battery */
+  try{ if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(()=>{}); } }catch(e){}
   /* 启动时将 IndexedDB 相册缓存预装进内存：再次点开相册即时显示、无骨架屏 */
   try{
     const rows=await storeGetAll("phonecache");
