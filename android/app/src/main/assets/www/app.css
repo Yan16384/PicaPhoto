@@ -194,9 +194,15 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #viewer video{pointer-events:auto}
 .v-count{position:absolute;top:calc(var(--safe-t) + 50px);left:14px;z-index:6;color:#fff;font-size:13px;font-weight:600;
   background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;animation:fadeIn .3s var(--ease) both}
-.v-close{position:absolute;top:calc(var(--safe-t) + 48px);right:12px;z-index:6;width:34px;height:34px;border-radius:50%;
+.v-close,.v-action{position:absolute;top:calc(var(--safe-t) + 48px);z-index:6;width:34px;height:34px;border-radius:50%;
   background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;transition:transform .16s var(--spring),background .2s}
+.v-close{right:12px}
+.v-action{right:54px;font-size:16px}
+.v-action#vUndoCompact{right:96px}
+.v-action.danger{background:rgba(229,69,69,.84)}
+.v-action[hidden]{display:none}
 .v-close:active{transform:scale(.86) rotate(90deg)}
+.v-action:active{transform:scale(.86)}
 #vHint{position:absolute;top:calc(var(--safe-t) + 92px);left:50%;transform:translateX(-50%);z-index:7;
   color:#fff;font-size:12px;background:rgba(0,0,0,.45);padding:5px 12px;border-radius:14px;opacity:0;
   transition:opacity .2s;white-space:nowrap}
