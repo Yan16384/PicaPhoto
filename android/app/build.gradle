@@ -1,0 +1,22 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.picaphoto.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.picaphoto.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 40
+        versionName "1.6.0"
+    }
+    buildTypes { release { minifyEnabled false } }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}

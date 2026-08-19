@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#2e58e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>PicaPhoto</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="topbar">
+  <button class="tb-btn" id="btn-back" aria-label="返回" style="display:none">‹</button>
+  <h1 id="title">整理</h1>
+  <button class="tb-btn" id="btn-add" aria-label="添加">＋</button>
+</header>
+
+<main>
+  <section class="view active" id="view-home">
+    <div id="pullHint"></div>
+    <div class="tool-card" id="trashCard">
+      <div class="ic">🗑️</div>
+      <div class="tt"><div class="n">回收站</div><div class="d" id="trashCardD">上滑照片即可回收，误删可找回</div></div>
+      <button class="mini-clear" id="trashClear" aria-label="清空回收站">✕</button>
+      <span class="arrow">›</span>
+    </div>
+    <div id="albums"></div>
+    <div style="height:80px"></div>
+  </section>
+  <section class="view" id="view-photos"><div id="photos"></div><div style="height:120px"></div></section>
+  <section class="view" id="view-trash"><div id="trash"></div></section>
+  <section class="view" id="view-me"></section>
+</main>
+
+<nav id="tabbar">
+  <div class="tab on" data-tab="org"><span class="ic">🗂️</span>整理</div>
+  <div class="tab" data-tab="me"><span class="ic">👤</span>我的</div>
+</nav>
+
+<!-- 大图整理：上预览区 + 下工作区 -->
+<div id="viewer">
+  <div id="vPreview">
+    <div id="vTrack"></div>
+    <div id="vTrashZone"><span class="ic">🗑️</span><span class="txt">松手移入回收站</span></div>
+    <div id="vHint">↑ 上滑回收 · ↓ 下滑返回 · 捏合返回</div>
+    <div class="v-count" id="vCount">1 / 1</div>
+    <button class="v-close" id="vClose">✕</button>
+  </div>
+  <div id="vWork"></div>
+</div>
+
+<div id="multiAlbums"></div>
+<div id="selbar">
+  <span class="count" id="selCount">0 项</span>
+  <button class="sbtn" id="selAll">全选</button>
+  <button class="sbtn" id="selDone">完成</button>
+  <button class="sbtn green" id="selMove">移动到</button>
+  <button class="sbtn danger" id="selDel">删除</button>
+</div>
+
+<div id="sheet">
+  <div class="panel">
+    <div class="head"><span id="sheetTitle">选择操作</span><span class="x" id="sheetX">✕</span></div>
+    <div class="list" id="sheetList"></div>
+  </div>
+</div>
+
+<div id="dlg">
+  <div class="box">
+    <div class="t" id="dlgTitle">标题</div>
+    <input id="dlgInput" placeholder="请输入名称">
+    <div class="btns"><button class="no" id="dlgCancel">取消</button><button class="ok" id="dlgOk">确定</button></div>
+  </div>
+</div>
+
+<div id="hidePanel">
+  <div class="box">
+    <div class="t">隐藏相册（照片计入未整理）</div>
+    <div class="hide-list" id="hideList"></div>
+    <div class="btns"><button class="no" id="hideCancel">取消</button><button class="ok" id="hideDone">完成 (0)</button></div>
+  </div>
+</div>
+
+<div id="updateDlg">
+  <div class="box">
+    <div class="t">发现新版本</div>
+    <div class="ver" id="updVer"></div>
+    <div class="log" id="updLog"></div>
+    <div class="btns"><button class="no" id="updIgnore">忽略此版本</button><button class="ok" id="updNow">更新</button></div>
+  </div>
+</div>
+
+<div id="phPreview"></div>
+
+
+
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

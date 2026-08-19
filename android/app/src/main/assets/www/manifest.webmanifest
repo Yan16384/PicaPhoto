@@ -1,0 +1,15 @@
+﻿{
+  "name": "PicaPhoto 移动版",
+  "short_name": "PicaPhoto",
+  "description": "手机图片整理：相册分类、滑动浏览、批量移动，适配高刷与高分屏",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f3f5",
+  "theme_color": "#2e58e8",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

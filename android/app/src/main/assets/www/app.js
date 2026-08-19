@@ -1753,8 +1753,7 @@ function moveOutCurrent(name){
         const sourceId=(m.albumId || (phoneAlbum!=="unfiled"?phoneAlbum:null));
         if(sourceId) removeUrisFromCachedAlbum(sourceId,[m.uri]); else phoneMediaCache.delete("unfiled");
         try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
-        lastMoved=res[0].from ? {items:[{item:m,from:res[0].from}],name:name} : null;
-        toast("已移出「"+name+"」到 PicaPhoto", lastMoved ? "撤销" : "", lastMoved ? undoLastMove : null);
+        toast("已移出「"+name+"」到 PicaPhoto");
         updateFabDone();
       } else {
         if(i>=0 && viewerList.indexOf(m)<0) viewerList.splice(i,0,m);
@@ -1817,15 +1816,14 @@ async function moveCurrentTo(name){
     try{
       const mcCb=nativeCallback("movecurrent", resJson => {
         let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
-      if(res[0]&&res[0].ok){
+        if(res[0]&&res[0].ok){
           recordStats("move",1);
           const sourceId=(m.albumId || (phoneAlbum!=="unfiled"?phoneAlbum:null));
           if(sourceId) removeUrisFromCachedAlbum(sourceId,[m.uri]); else phoneMediaCache.delete("unfiled");
           const target=phoneAlbums.find(a=>a.name===name);
           if(target) invalidateAlbumCache(target.id);
           try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
-          lastMoved=res[0].from ? {items:[{item:m,from:res[0].from}],name:name} : null;
-          toast("已移入「"+name+"」", lastMoved ? "撤销" : "", lastMoved ? undoLastMove : null);
+          toast("已移入「"+name+"」");
           updateFabDone();
           /* 移入成功自动进入下一张，方便连续整理 */
           viewerIdx = Math.min(viewerIdx+1, Math.max(0, viewerList.length-1));
