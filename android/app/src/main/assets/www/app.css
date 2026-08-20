@@ -199,8 +199,6 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .v-close{right:12px}
 .v-action{right:54px;font-size:16px}
 .v-action#vUndoCompact{right:96px}
-.v-action#vReview{right:138px}
-.v-action#vReview.on{background:rgba(7,193,96,.9)}
 .v-action.danger{background:rgba(229,69,69,.84)}
 .v-action[hidden]{display:none}
 .v-close:active{transform:scale(.86) rotate(90deg)}

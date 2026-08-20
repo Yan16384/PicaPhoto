@@ -86,7 +86,7 @@ public class MediaBridge {
 
     public MediaBridge(Activity a) {
         activity = a;
-        thumbDir = new File(a.getCacheDir(), "thumbs_v2");
+        thumbDir = new File(a.getCacheDir(), "thumbs_v3");
         try { if (!thumbDir.exists()) thumbDir.mkdirs(); } catch (Exception ignored) {}
         try { io.execute(this::cleanupThumbCache); } catch (Exception ignored) {}
     }
@@ -228,6 +228,13 @@ public class MediaBridge {
     @JavascriptInterface
     public void requestWriteBatch(final String jsonUris, final String cb) {
         if (Build.VERSION.SDK_INT < 30) { callJs(cb, "true"); return; }
+        /* MANAGE_MEDIA is broader than per-URI grants. checkUriPermission() may still
+           report DENIED on vendor ROMs (including vivo/iQOO), so do not open a
+           redundant createWriteRequest dialog after special access is enabled. */
+        if (Build.VERSION.SDK_INT >= 31 && MediaStore.canManageMedia(activity)) {
+            callJs(cb, "true");
+            return;
+        }
         io.execute(() -> {
             final ArrayList<Uri> uris = new ArrayList<>();
             try {
@@ -668,6 +675,20 @@ public class MediaBridge {
         return rel;
     }
 
+    @JavascriptInterface
+    public void deleteEmptyAlbum(String name) {
+        final String safe = (name == null ? "" : name).replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (safe.isEmpty()) return;
+        io.execute(() -> {
+            try {
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                        "PicaPhoto/" + safe);
+                File[] children = dir.listFiles();
+                if (dir.exists() && (children == null || children.length == 0)) dir.delete();
+            } catch (Exception ignored) {}
+        });
+    }
+
     /* 可见项按需缩略图：原生磁盘缓存，不再把图片 Base64 送进 JS/IndexedDB。 */
     @JavascriptInterface
     public void getMediaThumbV2Async(final String uriStr, final long version, final String cb) {
@@ -738,7 +759,7 @@ public class MediaBridge {
 
             if (!thumbDir.exists() && !thumbDir.mkdirs()) return null;
             if (Build.VERSION.SDK_INT >= 29) {
-                bmp = activity.getContentResolver().loadThumbnail(u, new Size(256, 256), null);
+                bmp = activity.getContentResolver().loadThumbnail(u, new Size(512, 512), null);
             } else if (isVideo(u)) {
                 android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
                 try {
@@ -754,7 +775,7 @@ public class MediaBridge {
             }
             if (bmp == null) return null;
 
-            int max = 256;
+            int max = 512;
             int bw = bmp.getWidth(), bh = bmp.getHeight();
             Bitmap scaled = bmp;
             if (bw > max || bh > max) {
@@ -767,7 +788,7 @@ public class MediaBridge {
             File tmp = new File(thumbDir, key + ".tmp");
             boolean ok;
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
-                ok = scaled.compress(Bitmap.CompressFormat.JPEG, 74, fos);
+                ok = scaled.compress(Bitmap.CompressFormat.JPEG, 78, fos);
                 fos.flush();
             }
             if (scaled != bmp) scaled.recycle();
@@ -909,7 +930,8 @@ public class MediaBridge {
             String[] projection = {
                     MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE,
                     MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.Files.FileColumns.MEDIA_TYPE, versionCol
+                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE,
+                    MediaStore.Files.FileColumns.MEDIA_TYPE, versionCol
             };
 
             List<String> args = new ArrayList<>();
@@ -976,6 +998,7 @@ public class MediaBridge {
             int cb=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
             int cbn=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
             int cd=c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
+            int cs=c.getColumnIndex(MediaStore.MediaColumns.SIZE);
             int ct=c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE);
             int cv=c.getColumnIndex(versionCol);
             int read=0; boolean hasMore=false; long lastDate=-1L,lastId=-1L;
@@ -989,6 +1012,7 @@ public class MediaBridge {
                 o.put("uri",ContentUris.withAppendedId(base,id).toString());
                 String name=c.getString(cn),mime=c.getString(cm);
                 o.put("name",name==null?"":name); o.put("mime",mime==null?"":mime); o.put("isVideo",!isImage);
+                if(cs>=0&&!c.isNull(cs))o.put("size",c.getLong(cs));
                 o.put("dateAdded",date); if(cv>=0&&!c.isNull(cv))o.put("thumbVersion",c.getLong(cv));
                 if(cb>=0&&!c.isNull(cb))o.put("albumId",c.getString(cb));
                 if(cbn>=0&&!c.isNull(cbn)){ JSONArray names=new JSONArray(); names.put(c.getString(cbn)); o.put("albumNames",names); }
