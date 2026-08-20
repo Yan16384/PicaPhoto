@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.9";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.10";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -684,15 +684,16 @@ function openPhoneAlbum(id, name){
     renderPhotos();
     /* “未整理”首页显示的是完整数量，进入后在后台补齐整个队列。
        只加载首页 120 项时，扣除回收站项会让 968 看起来只剩 106。 */
-    if(id==="unfiled"||queueOrder!=="new"){
-      readPhoneMediaAll(id,all=>{
-        if(seq!==albumOpenSeq||phoneAlbum!==id) return;
-        phoneMedia=all;
-        if(id==="unfiled") unfiledTotal=all.length;
-        rememberAlbum(id,all,mediaStoreToken(true),{nextOffset:all.length,hasMore:false,complete:true});
-        renderPhotos(true);
-      });
-    }
+    readPhoneMediaAll(id,all=>{
+      if(seq!==albumOpenSeq||phoneAlbum!==id) return;
+      phoneMedia=all;
+      if(id==="unfiled") unfiledTotal=all.length;
+      const done={nextOffset:all.length,hasMore:false,complete:true};
+      const token=mediaStoreToken(true);
+      rememberAlbum(id,all,token,done);
+      putAlbumCache(id,all,token,done);
+      renderPhotos(true);
+    });
   });
 }
 function exitPhoneMode(){
@@ -730,7 +731,7 @@ function albumPicker(title, onPick){
     const input=document.createElement("input"); input.className="album-search"; input.placeholder="搜索相册"; input.value=q||"";
     input.addEventListener("input",()=>render(input.value)); list.appendChild(input);
     if(!key && recent.size){ const hint=document.createElement("div"); hint.className="sheet-label"; hint.textContent="最近使用"; list.appendChild(hint); }
-    sorted.forEach(a=>{ const el=document.createElement("div"); el.className="opt"; el.innerHTML='<span class="ic">'+(recent.has(a.name)&&!key?'🕘':'📁')+'</span><span>'+escapeHtml(a.name)+'</span>'; el.addEventListener("click",()=>{closeSheet();onPick(a.name);}); list.appendChild(el); });
+    sorted.forEach(a=>{ const el=document.createElement("div"); el.className="opt"; el.innerHTML='<span class="ic">'+(recent.has(a.name)&&!key?'🕘':'📁')+'</span><span>'+escapeHtml(a.name)+'</span>'; el.addEventListener("click",()=>{closeSheet();onPick(a.name,a);}); list.appendChild(el); });
     const add=document.createElement("div"); add.className="opt"; add.innerHTML='<span class="ic">➕</span><span>新建相册…</span>'; add.addEventListener("click",()=>{closeSheet();promptInput("新建相册","",v=>{if(v){createSystemAlbum(v,()=>onPick(v));}});}); list.appendChild(add);
   };
   $("#sheetTitle").textContent=title||"选择相册"; $("#sheet").classList.add("open"); render("");
@@ -1065,7 +1066,7 @@ let thObserver=null;
 let thQueue=[];
 let thActive=0;
 const TH_MAX_CONCURRENT=3;
-const TH_TIMEOUT_MS=1200;
+const TH_TIMEOUT_MS=6000;
 const TH_MAX_ATTEMPTS=3;
 function finishThumbAttempt(uri,thumb){
   const entry=thPending.get(uri);
@@ -1077,6 +1078,10 @@ function finishThumbAttempt(uri,thumb){
     if(entry.img&&entry.img.isConnected){
       entry.img.onload=()=>{const cur=thPending.get(uri);if(cur===entry)thPending.delete(uri);};
       entry.img.onerror=()=>{
+        try{
+          if(BRIDGE&&BRIDGE.invalidateMediaThumb)
+            BRIDGE.invalidateMediaThumb(uri,entry.m.thumbVersion!=null?entry.m.thumbVersion:-1);
+        }catch(e){}
         entry.m.thumb=""; entry.img.onerror=null; entry.img.src=isVideo(entry.m)?VP_PLACEHOLDER:IP_PLACEHOLDER;
         retryThumb(uri);
       };
@@ -1480,9 +1485,14 @@ function moveSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
   if(phoneAlbum===null){ toast("请先进入手机相册"); return; }
-  albumPicker("移动到相册",name=>nativeMove(name,list));
+  albumPicker("移动到相册",(name,target)=>nativeMove(name,list,target));
 }
-function nativeMove(name, list){
+function requestNativeAlbumMove(name,target,jsonUris,cb){
+  if(target&&target.id&&BRIDGE&&BRIDGE.moveToAlbumIdAsync)
+    BRIDGE.moveToAlbumIdAsync(String(target.id),jsonUris,cb);
+  else BRIDGE.moveToAlbumAsync(name,jsonUris,cb);
+}
+function nativeMove(name, list, target){
   if(!list || !list.length) return;
   try {
     const uris = JSON.stringify(list.map(m=>m.uri));
@@ -1508,8 +1518,8 @@ function nativeMove(name, list){
         const sourceId=(phoneAlbum && phoneAlbum!=="unfiled") ? phoneAlbum : (removed[0]&&removed[0].albumId);
         if(sourceId) removeUrisFromCachedAlbum(sourceId,okUris);
         else phoneMediaCache.delete("unfiled");
-        const target=phoneAlbums.find(a=>a.name===name);
-        if(target) invalidateAlbumCache(target.id);
+        const targetAlbum=target||phoneAlbums.find(a=>a.name===name);
+        if(targetAlbum) invalidateAlbumCache(targetAlbum.id);
         try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
         const undoItems=res.filter(r=>r.ok && r.from).map(r=>{
           const item=removed.find(m=>m.uri===r.uri);
@@ -1530,7 +1540,7 @@ function nativeMove(name, list){
       }
       if(ok>0 && BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
     });
-    BRIDGE.moveToAlbumAsync(name, uris, moveCb);
+    requestNativeAlbumMove(name,target,uris,moveCb);
     /* 后台等 MediaStore 更新后再刷新相册计数 */
     setTimeout(()=>{
       try{ if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true); if(orgSub==="home") renderHome(); }catch(e){}
@@ -1934,13 +1944,13 @@ function updateViewerChrome(){
     });
   } else {
     let chips='<div class="vchip new" id="vNew">＋ 新建</div>';
-    albumTargets().forEach(a=>{ chips+='<div class="vchip" data-alb="'+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</div>'; });
+    albumTargets().forEach(a=>{ chips+='<div class="vchip" data-alb="'+escapeHtml(a.name)+'" data-albid="'+escapeHtml(String(a.id||""))+'">'+escapeHtml(a.name)+'</div>'; });
     work.innerHTML='<div class="vw-albums">'+chips+'</div>';
     work.querySelectorAll(".vchip").forEach(c=>{
       c.addEventListener("click", ()=>{
         if(c.id==="vNew"){ promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>moveCurrentTo(v)); } }); }
         else if(c.classList.contains("on")){ moveOutCurrent(c.dataset.alb); }
-        else { moveCurrentTo(c.dataset.alb); }
+        else { moveCurrentTo(c.dataset.alb,albumTargets().find(a=>String(a.id||"")===String(c.dataset.albid||""))||null); }
       });
     });
     /* 高亮当前照片所属相册（照片自带 albumNames；旧数据/异常时 fallback 原生查询） */
@@ -2033,7 +2043,7 @@ function moveViewer(step){
   setTrack(0,0,1,true);
   updateViewerChrome();
 }
-async function moveCurrentTo(name){
+async function moveCurrentTo(name,target){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(m.uri && m.uri.startsWith("content:")){
@@ -2049,8 +2059,8 @@ async function moveCurrentTo(name){
           recordStats("move",1);
           const sourceId=(m.albumId || (phoneAlbum!=="unfiled"?phoneAlbum:null));
           if(sourceId) removeUrisFromCachedAlbum(sourceId,[m.uri]); else phoneMediaCache.delete("unfiled");
-          const target=phoneAlbums.find(a=>a.name===name);
-          if(target) invalidateAlbumCache(target.id);
+          const targetAlbum=target||phoneAlbums.find(a=>a.name===name);
+          if(targetAlbum) invalidateAlbumCache(targetAlbum.id);
           try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
           if(res[0].from) moveUndoStack.push({items:[{item:m,from:res[0].from,viewerIndex:i}],name:name});
           syncViewerActions();
@@ -2065,7 +2075,7 @@ async function moveCurrentTo(name){
           toast("移动失败");
         }
       });
-      BRIDGE.moveToAlbumAsync(name, JSON.stringify([m.uri]), mcCb);
+      requestNativeAlbumMove(name,target,JSON.stringify([m.uri]),mcCb);
     }catch(e){ toast("移动失败："+e); }
   } else {
     const a=albums.find(x=>x.name===name);
@@ -2525,15 +2535,15 @@ function renderMultiAlbums(){
   albumTargets().forEach(a=>{
     const c=document.createElement("button"); c.className="mchip";
     c.textContent="\uD83D\uDCC1 "+a.name;
-    c.addEventListener("click", ()=>{ moveSelTo(a.name); });
+    c.addEventListener("click", ()=>{ moveSelTo(a.name,a); });
     box.appendChild(c);
   });
   box.classList.add("show");
 }
-function moveSelTo(name){
+function moveSelTo(name,target){
   const list=visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length){ exitMulti(); return; }
-  nativeMove(name, list);
+  nativeMove(name,list,target);
 }
 
 /* ============ 安卓返回键：管理模式→弹层→查看器→上一级→退出 ============ */

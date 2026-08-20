@@ -727,6 +727,18 @@ public class MediaBridge {
         io.execute(this::clearThumbCacheSync);
     }
 
+    /** WebView 解码失败说明命中的磁盘文件不可用；删除后下一次请求必须重新生成。 */
+    @JavascriptInterface
+    public void invalidateMediaThumb(final String uriStr, final long suppliedVersion) {
+        try {
+            Uri u = Uri.parse(uriStr);
+            long version = suppliedVersion >= 0L ? suppliedVersion : mediaItemGeneration(u);
+            String key = sha1(uriStr + "|" + version);
+            try { new File(thumbDir, key + ".jpg").delete(); } catch (Exception ignored) {}
+            try { new File(thumbDir, key + ".tmp").delete(); } catch (Exception ignored) {}
+        } catch (Exception ignored) {}
+    }
+
     /* WebView 本地缩略图资源：避免 file:// 跨路径差异，也不需要暴露外部存储。 */
     public WebResourceResponse interceptThumbRequest(Uri uri) {
         try {
@@ -759,7 +771,7 @@ public class MediaBridge {
 
             if (!thumbDir.exists() && !thumbDir.mkdirs()) return null;
             if (Build.VERSION.SDK_INT >= 29) {
-                bmp = activity.getContentResolver().loadThumbnail(u, new Size(512, 512), null);
+                bmp = activity.getContentResolver().loadThumbnail(u, new Size(320, 320), null);
             } else if (isVideo(u)) {
                 android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
                 try {
@@ -775,7 +787,7 @@ public class MediaBridge {
             }
             if (bmp == null) return null;
 
-            int max = 512;
+            int max = 320;
             int bw = bmp.getWidth(), bh = bmp.getHeight();
             Bitmap scaled = bmp;
             if (bw > max || bh > max) {
@@ -908,12 +920,6 @@ public class MediaBridge {
                     : MediaStore.Files.getContentUri("external");
             String versionCol = Build.VERSION.SDK_INT >= 30
                     ? MediaStore.MediaColumns.GENERATION_MODIFIED : MediaStore.MediaColumns.DATE_MODIFIED;
-            String[] projection = {
-                    MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE,
-                    MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE,
-                    MediaStore.Files.FileColumns.MEDIA_TYPE, versionCol
-            };
             List<String> args = new ArrayList<>();
             StringBuilder sel = new StringBuilder("(")
                     .append(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME).append(" IS NULL OR ")
@@ -941,30 +947,70 @@ public class MediaBridge {
             }
             sel.append(")");
             String order = MediaStore.MediaColumns.DATE_ADDED + " DESC, " + MediaStore.MediaColumns._ID + " DESC";
-            c = activity.getContentResolver().query(files, projection, sel.toString(), args.toArray(new String[0]), order);
+            /* 第一遍只读固定宽度索引，避免大字段把 vivo/iQOO CursorWindow 撑满后静默截断。 */
+            c = activity.getContentResolver().query(files,
+                    new String[]{MediaStore.MediaColumns._ID, MediaStore.Files.FileColumns.MEDIA_TYPE},
+                    sel.toString(), args.toArray(new String[0]), order);
             if (c == null) return arr.toString();
-            int ci=c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-            int cn=c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
-            int cm=c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
-            int cb=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
-            int cbn=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
-            int cd=c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
-            int cs=c.getColumnIndex(MediaStore.MediaColumns.SIZE);
-            int ct=c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE);
-            int cv=c.getColumnIndex(versionCol);
-            while(c.moveToNext()) {
-                long id=c.getLong(ci); int mt=c.getInt(ct);
-                boolean isImage=mt==MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
-                Uri base=isImage?MediaStore.Images.Media.EXTERNAL_CONTENT_URI:MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-                JSONObject o=new JSONObject();
-                o.put("uri",ContentUris.withAppendedId(base,id).toString());
-                String name=c.getString(cn),mime=c.getString(cm);
-                o.put("name",name==null?"":name); o.put("mime",mime==null?"":mime); o.put("isVideo",!isImage);
-                if(cs>=0&&!c.isNull(cs))o.put("size",c.getLong(cs));
-                o.put("dateAdded",(cd>=0&&!c.isNull(cd))?c.getLong(cd):0L);
-                if(cv>=0&&!c.isNull(cv))o.put("thumbVersion",c.getLong(cv));
-                if(cb>=0&&!c.isNull(cb))o.put("albumId",c.getString(cb));
-                if(cbn>=0&&!c.isNull(cbn)){JSONArray names=new JSONArray();names.put(c.getString(cbn));o.put("albumNames",names);}
+            List<Long> ids = new ArrayList<>();
+            List<Integer> types = new ArrayList<>();
+            while (c.moveToNext()) { ids.add(c.getLong(0)); types.add(c.getInt(1)); }
+            c.close(); c = null;
+
+            String[] detailProjection = {
+                    MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE,
+                    MediaStore.Files.FileColumns.MEDIA_TYPE, versionCol
+            };
+            Map<Long, JSONObject> details = new HashMap<>();
+            final int batchSize = 128;
+            for (int start = 0; start < ids.size(); start += batchSize) {
+                int end = Math.min(ids.size(), start + batchSize);
+                StringBuilder in = new StringBuilder(MediaStore.MediaColumns._ID).append(" IN (");
+                String[] idArgs = new String[end - start];
+                for (int i = start; i < end; i++) {
+                    if (i > start) in.append(',');
+                    in.append('?'); idArgs[i - start] = String.valueOf(ids.get(i));
+                }
+                in.append(')');
+                Cursor d = null;
+                try {
+                    d = activity.getContentResolver().query(files, detailProjection, in.toString(), idArgs, null);
+                    if (d == null) continue;
+                    int ci=d.getColumnIndexOrThrow(MediaStore.MediaColumns._ID), cn=d.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME);
+                    int cm=d.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE), cb=d.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
+                    int cbn=d.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME), cd=d.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
+                    int cs=d.getColumnIndex(MediaStore.MediaColumns.SIZE), ct=d.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE);
+                    int cv=d.getColumnIndex(versionCol);
+                    while (d.moveToNext()) {
+                        try {
+                            long id=d.getLong(ci); int mt=d.getInt(ct);
+                            boolean isImage=mt==MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
+                            Uri base=isImage?MediaStore.Images.Media.EXTERNAL_CONTENT_URI:MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                            JSONObject o=new JSONObject();
+                            o.put("uri",ContentUris.withAppendedId(base,id).toString());
+                            String name=cn>=0?d.getString(cn):"", mime=cm>=0?d.getString(cm):"";
+                            o.put("name",name==null?"":name); o.put("mime",mime==null?"":mime); o.put("isVideo",!isImage);
+                            if(cs>=0&&!d.isNull(cs))o.put("size",d.getLong(cs));
+                            o.put("dateAdded",(cd>=0&&!d.isNull(cd))?d.getLong(cd):0L);
+                            if(cv>=0&&!d.isNull(cv))o.put("thumbVersion",d.getLong(cv));
+                            if(cb>=0&&!d.isNull(cb))o.put("albumId",d.getString(cb));
+                            if(cbn>=0&&!d.isNull(cbn)){JSONArray names=new JSONArray();names.put(d.getString(cbn));o.put("albumNames",names);}
+                            details.put(id,o);
+                        } catch (Exception ignored) {}
+                    }
+                } finally { try { if(d!=null)d.close(); } catch(Exception ignored){} }
+            }
+            /* 即使个别详情行异常，也保留轻量索引项，保证列表数量与首页 COUNT 完全一致。 */
+            for (int i = 0; i < ids.size(); i++) {
+                long id=ids.get(i); JSONObject o=details.get(id);
+                if (o == null) {
+                    boolean isImage=types.get(i)==MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
+                    Uri base=isImage?MediaStore.Images.Media.EXTERNAL_CONTENT_URI:MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                    o=new JSONObject(); o.put("uri",ContentUris.withAppendedId(base,id).toString());
+                    o.put("name",""); o.put("mime",isImage?"image/*":"video/*"); o.put("isVideo",!isImage); o.put("dateAdded",0L);
+                }
                 arr.put(o);
             }
         } catch (Exception ignored) {
@@ -1216,6 +1262,48 @@ public class MediaBridge {
     @JavascriptInterface
     public void moveToAlbumAsync(final String albumName, final String jsonUris, final String cb) {
         requestMove(jsonUris, createAlbumSync(albumName), cb);
+    }
+
+    /** 移入已有相册必须使用该相册真实路径，不能按同名在 PicaPhoto 下另建目录。 */
+    @JavascriptInterface
+    public void moveToAlbumIdAsync(final String albumId, final String jsonUris, final String cb) {
+        io.execute(() -> {
+            String path = albumRelativePathSync(albumId);
+            if (path == null || path.trim().isEmpty()) {
+                callJs(cb, errorResults(jsonUris, "album_not_found"));
+                return;
+            }
+            requestMove(jsonUris, path, cb);
+        });
+    }
+
+    private String albumRelativePathSync(String albumId) {
+        Cursor c = null;
+        try {
+            Uri files = Build.VERSION.SDK_INT >= 29
+                    ? MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    : MediaStore.Files.getContentUri("external");
+            String column = Build.VERSION.SDK_INT >= 29
+                    ? MediaStore.MediaColumns.RELATIVE_PATH : MediaStore.MediaColumns.DATA;
+            String selection = MediaStore.MediaColumns.BUCKET_ID + "=? AND " + column + " IS NOT NULL";
+            c = activity.getContentResolver().query(files, new String[]{column}, selection,
+                    new String[]{albumId}, MediaStore.MediaColumns.DATE_ADDED + " DESC");
+            if (c == null || !c.moveToFirst()) return null;
+            String value = c.getString(0);
+            if (Build.VERSION.SDK_INT >= 29) return value;
+            if (value == null) return null;
+            File parent = new File(value).getParentFile();
+            File root = Environment.getExternalStorageDirectory();
+            if (parent == null || root == null) return null;
+            String parentPath = parent.getCanonicalPath().replace('\\', '/');
+            String rootPath = root.getCanonicalPath().replace('\\', '/');
+            if (!parentPath.startsWith(rootPath + "/")) return null;
+            return parentPath.substring(rootPath.length() + 1) + "/";
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            try { if (c != null) c.close(); } catch (Exception ignored) {}
+        }
     }
 
     @JavascriptInterface

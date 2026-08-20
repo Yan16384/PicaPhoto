@@ -4,6 +4,6 @@ Android WebView 容器与 MediaStore 桥接源码。网页资源在 `app/src/mai
 
 构建要求：Android SDK Platform 34、Build Tools 34.0.0、JDK 17、Gradle 8.2。
 
-`assembleDebug` 生成 `app/build/outputs/apk/debug/app-debug.apk`。当前版本为 2.0.9（versionCode 59）。
+`assembleDebug` 生成 `app/build/outputs/apk/debug/app-debug.apk`。当前版本为 2.0.10（versionCode 60）。
 
 Android 12+ 可在应用内点“申请相册访问权限”进入系统媒体管理特殊访问页；开启后直接按 `MediaStore.canManageMedia()` 判定，不再受 vivo/iQOO 单 URI 权限检查结果干扰。Android 11 会在打开整理大图时一次批量申请当前队列的写入权限。
