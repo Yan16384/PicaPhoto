@@ -48,6 +48,9 @@ img{-webkit-user-drag:none;user-select:none}
 #topbar .tb-btn{min-width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;
   font-size:17px;background:var(--card);border:1px solid var(--line);padding:0 8px;transition:transform .14s var(--spring),background .2s}
 #topbar .tb-btn:active{transform:scale(.88)}
+#topbar .tb-filter{flex:none;height:32px;padding:0 9px;border-radius:16px;background:var(--bg);color:var(--sub);
+  border:1px solid var(--line);font-size:11px;font-weight:700;white-space:nowrap;transition:transform .14s var(--spring),color .18s,border-color .18s}
+#topbar .tb-filter:active{transform:scale(.9);color:var(--accent);border-color:var(--accent)}
 main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h) + var(--safe-b));overflow:hidden}
 .view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 30px;display:none;overscroll-behavior-y:contain}
 .view.active{display:block;animation:viewIn .18s var(--ease)}
@@ -277,8 +280,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
   backdrop-filter:blur(14px);border-top:1px solid var(--line);-webkit-overflow-scrolling:touch;scrollbar-width:none}
 #multiAlbums.show{display:flex;animation:riseIn .15s var(--ease)}
 #multiAlbums::-webkit-scrollbar{display:none}
-#multiAlbums .mchip{flex:none;height:36px;padding:0 16px;border-radius:18px;background:var(--accent);color:#fff;
-  font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring)}
+#multiAlbums .mchip{flex:none;height:36px;padding:0 16px;border-radius:18px;background:var(--bg);color:var(--sub);border:1px solid var(--line);
+  font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .14s var(--spring),background .18s,color .18s,border-color .18s}
 #multiAlbums .mchip:active{transform:scale(.9)}
 #multiAlbums .mchip.new{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
 /* ============ Toast ============ */

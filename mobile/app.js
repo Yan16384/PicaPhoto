@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.7";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.8";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -892,11 +892,41 @@ function visibleMedia(){
 }
 function setMediaSort(value){
   queueOrder=value; localStorage.setItem("pp_queue_order",value);
-  if(tab==="me") renderMe(); else if(orgSub==="photos") renderPhotos(true);
+  refreshPhotoTools();
+  applyMediaChoice(value!=="new");
 }
 function setMediaFilter(value){
   mediaFilter=value; localStorage.setItem("pp_media_filter",value);
-  if(tab==="me") renderMe(); else if(orgSub==="photos") renderPhotos(true);
+  refreshPhotoTools();
+  applyMediaChoice(value!=="all");
+}
+function applyMediaChoice(requireAll){
+  const id=phoneAlbum,st=id?phonePageState.get(id):null,seq=albumOpenSeq;
+  if(requireAll&&id&&st&&st.hasMore){
+    toast("正在加载完整队列…");
+    readPhoneMediaAll(id,all=>{
+      if(seq!==albumOpenSeq||phoneAlbum!==id)return;
+      phoneMedia=all; if(id==="unfiled")unfiledTotal=all.length;
+      rememberAlbum(id,all,mediaStoreToken(true),{nextOffset:all.length,hasMore:false,complete:true});
+      renderPhotos(true);
+    });
+  }else if(orgSub==="photos") renderPhotos(true);
+}
+function refreshPhotoTools(){
+  const s=$("#sortTool"),f=$("#filterTool");
+  if(s)s.textContent="↕ "+(queueOrder==="new"?"最新":queueOrder==="old"?"最早":queueOrder==="size_desc"?"大文件":"小文件");
+  if(f)f.textContent="▦ "+(mediaFilter==="all"?"全部":mediaFilter==="photo"?"照片":"视频");
+}
+function openMediaSortSheet(){
+  sheet([{ic:"🆕",t:"最新时间优先",f:()=>setMediaSort("new")},
+    {ic:"🕘",t:"最早时间优先",f:()=>setMediaSort("old")},
+    {ic:"🐘",t:"大文件优先",f:()=>setMediaSort("size_desc")},
+    {ic:"🪶",t:"小文件优先",f:()=>setMediaSort("size_asc")}],"整理排序");
+}
+function openMediaFilterSheet(){
+  sheet([{ic:"🖼️",t:"照片和视频",f:()=>setMediaFilter("all")},
+    {ic:"📷",t:"仅照片",f:()=>setMediaFilter("photo")},
+    {ic:"🎬",t:"仅视频",f:()=>setMediaFilter("video")}],"媒体筛选");
 }
 
 /* 下拉刷新（整理首页） */
@@ -2249,8 +2279,6 @@ function renderMe(){
       <div class="set-row" id="rowManageMedia"><div class="tt"><div class="n">申请相册访问权限</div><div class="d">${manageDesc}</div></div><span class="arrow">${canManageMedia()?"已开启":"›"}</span></div>
       <div class="set-row" id="rowTheme"><div class="tt"><div class="n">外观主题</div><div class="d" id="themeDesc">${themeDesc}</div></div>
         <div class="switch ${darkOn?'on':''}" id="swTheme"></div></div>
-      <div class="set-row" id="rowQueue"><div class="tt"><div class="n">整理排序</div><div class="d">${queueOrder==="new"?"最新时间优先":queueOrder==="old"?"最早时间优先":queueOrder==="size_desc"?"大文件优先":"小文件优先"}</div></div><span class="arrow">›</span></div>
-      <div class="set-row" id="rowMediaFilter"><div class="tt"><div class="n">媒体筛选</div><div class="d">${mediaFilter==="all"?"照片和视频":mediaFilter==="photo"?"仅照片":"仅视频"}</div></div><span class="arrow">›</span></div>
     </div>
     <div class="set-h2">关于</div>
     <div class="set-group">
@@ -2271,17 +2299,6 @@ function renderMe(){
       {ic:"☀️",t:"浅色",f:()=>{theme="light";localStorage.setItem("pp_theme","light");applyTheme();renderMe();}},
       {ic:"🌙",t:"深色",f:()=>{theme="dark";localStorage.setItem("pp_theme","dark");applyTheme();renderMe();}}],"外观主题");
   });
-  $("#rowQueue").addEventListener("click",()=>sheet([
-    {ic:"🆕",t:"最新时间优先",f:()=>setMediaSort("new")},
-    {ic:"🕘",t:"最早时间优先",f:()=>setMediaSort("old")},
-    {ic:"🐘",t:"大文件优先",f:()=>setMediaSort("size_desc")},
-    {ic:"🪶",t:"小文件优先",f:()=>setMediaSort("size_asc")}
-  ],"整理排序"));
-  $("#rowMediaFilter").addEventListener("click",()=>sheet([
-    {ic:"🖼️",t:"照片和视频",f:()=>setMediaFilter("all")},
-    {ic:"📷",t:"仅照片",f:()=>setMediaFilter("photo")},
-    {ic:"🎬",t:"仅视频",f:()=>setMediaFilter("video")}
-  ],"媒体筛选"));
   $("#swTheme").addEventListener("click", e=>{
     e.stopPropagation();
     const cur = currentTheme();
@@ -2413,8 +2430,12 @@ function hideOrgViews(){
 }
 function updateTopbar(){
   const inSub = orgSub!=="home" && tab==="org";
+  const inPhotos = orgSub==="photos" && tab==="org";
   $("#btn-back").style.display = inSub ? "" : "none";
   $("#btn-add").style.display = (tab==="me" || inSub) ? "none" : "";
+  $("#sortTool").style.display = inPhotos ? "" : "none";
+  $("#filterTool").style.display = inPhotos ? "" : "none";
+  if(inPhotos)refreshPhotoTools();
 }
 function switchTab(t){
   tab = t;
@@ -2449,6 +2470,8 @@ $("#btn-add").addEventListener("click", ()=>{
 $("#trashCard").addEventListener("click", openTrashView);
 /* 回收站卡片右侧小方块：一键清空回收站 */
 $("#trashClear").addEventListener("click", e=>{ e.stopPropagation(); emptyTrash(); });
+$("#sortTool").addEventListener("click",openMediaSortSheet);
+$("#filterTool").addEventListener("click",openMediaFilterSheet);
 $("#selDone").addEventListener("click", exitMulti);
 $("#hideDone").addEventListener("click", ()=>{ saveHidden(); $("#hidePanel").classList.remove("open"); renderHome(); toast(hiddenAlbums.size?("已隐藏 "+hiddenAlbums.size+" 个相册，照片计入未整理"):"未隐藏任何相册"); });
 $("#hideCancel").addEventListener("click", ()=>{ $("#hidePanel").classList.remove("open"); });
