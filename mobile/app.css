@@ -199,6 +199,8 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 .v-close{right:12px}
 .v-action{right:54px;font-size:16px}
 .v-action#vUndoCompact{right:96px}
+.v-action#vReview{right:138px}
+.v-action#vReview.on{background:rgba(7,193,96,.9)}
 .v-action.danger{background:rgba(229,69,69,.84)}
 .v-action[hidden]{display:none}
 .v-close:active{transform:scale(.86) rotate(90deg)}
@@ -250,6 +252,9 @@ main{position:fixed;inset:calc(var(--bar-h) + var(--safe-t)) 0 calc(var(--bar-h)
 #sheet .head .x{margin-left:auto;font-size:18px;color:var(--sub);padding:4px;transition:transform .2s var(--spring)}
 #sheet .head .x:active{transform:rotate(90deg)}
 #sheet .list{overflow-y:auto;-webkit-overflow-scrolling:touch}
+.album-search{margin:4px 14px 10px;width:calc(100% - 28px);height:40px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:0 12px;font-size:14px;outline:none}
+.album-search:focus{border-color:var(--accent)}
+.sheet-label{padding:4px 20px 8px;font-size:12px;color:var(--sub);font-weight:700}
 #sheet .opt{display:flex;align-items:center;gap:14px;padding:14px 20px;font-size:16px;border-top:1px solid var(--line);transition:background .15s;animation:riseIn .24s var(--ease) both}
 #sheet .opt:active{background:color-mix(in srgb,var(--fg) 4%,transparent)}
 #sheet .opt .ic{font-size:20px;width:24px;text-align:center}

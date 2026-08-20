@@ -365,6 +365,7 @@ public class MediaBridge {
                     MediaStore.MediaColumns._ID,
                     MediaStore.MediaColumns.DISPLAY_NAME,
                     MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.SIZE,
                     MediaStore.MediaColumns.BUCKET_ID,
                     MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
                     MediaStore.MediaColumns.DATE_ADDED,
@@ -429,6 +430,7 @@ public class MediaBridge {
             int ci = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
             int cn = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
             int cm = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
+            int cs = c.getColumnIndex(MediaStore.MediaColumns.SIZE);
             int cb = c.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
             int cbn = c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
             int cd = c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
@@ -452,6 +454,7 @@ public class MediaBridge {
                 String mime = c.getString(cm);
                 o.put("name", name == null ? "" : name);
                 o.put("mime", mime == null ? "" : mime);
+                if (cs >= 0 && !c.isNull(cs)) o.put("size", c.getLong(cs));
                 o.put("isVideo", !isImage);
                 o.put("dateAdded", date);
                 if (cv >= 0 && !c.isNull(cv)) o.put("thumbVersion", c.getLong(cv));
@@ -498,6 +501,7 @@ public class MediaBridge {
                     MediaStore.MediaColumns._ID,
                     MediaStore.MediaColumns.DISPLAY_NAME,
                     MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.SIZE,
                     MediaStore.MediaColumns.BUCKET_ID,
                     MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
                     MediaStore.MediaColumns.DATE_ADDED,
@@ -508,6 +512,7 @@ public class MediaBridge {
             int ci = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
             int cn = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
             int cm = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
+            int csIdx = c.getColumnIndex(MediaStore.MediaColumns.SIZE);
             int cbIdx = c.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
             int cbnIdx = c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
             int cdIdx = c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
@@ -522,6 +527,7 @@ public class MediaBridge {
                 String mime = c.getString(cm);
                 o.put("name", name == null ? "" : name);
                 o.put("mime", mime == null ? "" : mime);
+                if (csIdx >= 0 && !c.isNull(csIdx)) o.put("size", c.getLong(csIdx));
                 o.put("isVideo", !isImage);
                 if (cdIdx >= 0 && !c.isNull(cdIdx)) o.put("dateAdded", c.getLong(cdIdx));
                 if (cvIdx >= 0 && !c.isNull(cvIdx)) o.put("thumbVersion", c.getLong(cvIdx));

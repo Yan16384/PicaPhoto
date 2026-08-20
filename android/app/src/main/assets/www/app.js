@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "1.6.2";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.0";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -70,6 +70,7 @@ let urls = new Map();
 let lastTrashed = null;
 let moveUndoStack = [];
 let favs = new Set(JSON.parse(localStorage.getItem("pp_favs")||"[]"));
+let reviewed = new Set(JSON.parse(localStorage.getItem("pp_reviewed")||"[]"));
 let stats = { organizedTotal:0, organizedByDay:{}, trashTotal:0, restoreTotal:0, startDate:null };
 let calYear, calMonth;
 let statsDirty = 0, statsTimer = null;
@@ -77,6 +78,8 @@ let storageCache = { t:0, bytes:0 };
 let gridCols = (parseInt(localStorage.getItem("pp_grid_cols")||"3",10)||3);
 gridCols = Math.max(2, Math.min(6, gridCols));
 let vworkPos = localStorage.getItem("pp_vwork")||"bottom";   // bottom | left | right
+let queueOrder = localStorage.getItem("pp_queue_order")||"new";
+let defaultAlbum = localStorage.getItem("pp_default_album")||"";
 function applyVWork(){ const v=$("#viewer"); if(v) v.dataset.vwork=vworkPos; }
 
 /* ============ 工具 ============ */
@@ -105,6 +108,19 @@ function toggleFav(m){
   const k = m.uri || m.id;
   if(favs.has(k)) favs.delete(k); else favs.add(k);
   localStorage.setItem("pp_favs", JSON.stringify([...favs]));
+  markReviewed(m);
+  updateViewerChrome();
+}
+function markReviewed(m){
+  const key=itemKey(m);
+  if(!key || reviewed.has(key)) return;
+  reviewed.add(key);
+  try{ localStorage.setItem("pp_reviewed", JSON.stringify([...reviewed])); }catch(e){}
+}
+function toggleReviewed(m){
+  const key=itemKey(m); if(!key) return;
+  if(reviewed.has(key)) reviewed.delete(key); else reviewed.add(key);
+  try{ localStorage.setItem("pp_reviewed", JSON.stringify([...reviewed])); }catch(e){}
   updateViewerChrome();
 }
 function vibrate(ms){ try{ navigator.vibrate && navigator.vibrate(ms||15); }catch(e){} }
@@ -608,6 +624,7 @@ function openPhoneAlbum(id, name){
   stopPhotoBackgroundWork();
   phGridAlbum=null; phItems=[]; phItemMap=new Map(); phLayoutGroups=[]; phGroupByStart=new Map(); phTotalHeight=0; phWindowStart=phWindowEnd=-1; phEls=new Map();
   phoneAlbum = id; currentAlbum = null; orgSub = "photos";
+  try{ localStorage.setItem("pp_resume_album", JSON.stringify({id:id,name:name||"手机相册"})); }catch(e){}
   exitMulti();
   phoneMedia = [];
   try{ const v=document.getElementById("view-photos"); if(v) v.scrollTop=0; }catch(e){}
@@ -658,6 +675,26 @@ function albumTargets(){
   createdAlbums().forEach(n=>{ if(!map.has(n)) map.set(n,{name:n}); });
   return [...map.values()];
 }
+function recentAlbumNames(){ try{return JSON.parse(localStorage.getItem("pp_recent_albums")||"[]");}catch(e){return [];} }
+function rememberRecentAlbum(name){
+  const items=recentAlbumNames().filter(x=>x!==name); items.unshift(name);
+  try{ localStorage.setItem("pp_recent_albums",JSON.stringify(items.slice(0,8))); }catch(e){}
+}
+function albumPicker(title, onPick){
+  const all=albumTargets(); const recent=new Set(recentAlbumNames());
+  const render=q=>{
+    const key=(q||"").trim().toLowerCase();
+    const filtered=all.filter(a=>!key||a.name.toLowerCase().includes(key));
+    const sorted=filtered.slice().sort((a,b)=>(recent.has(b.name)?1:0)-(recent.has(a.name)?1:0)||a.name.localeCompare(b.name,"zh-CN"));
+    const list=$("#sheetList"); list.innerHTML='';
+    const input=document.createElement("input"); input.className="album-search"; input.placeholder="搜索相册"; input.value=q||"";
+    input.addEventListener("input",()=>render(input.value)); list.appendChild(input);
+    if(!key && recent.size){ const hint=document.createElement("div"); hint.className="sheet-label"; hint.textContent="最近使用"; list.appendChild(hint); }
+    sorted.forEach(a=>{ const el=document.createElement("div"); el.className="opt"; el.innerHTML='<span class="ic">'+(recent.has(a.name)&&!key?'🕘':'📁')+'</span><span>'+escapeHtml(a.name)+'</span>'; el.addEventListener("click",()=>{closeSheet();onPick(a.name);}); list.appendChild(el); });
+    const add=document.createElement("div"); add.className="opt"; add.innerHTML='<span class="ic">➕</span><span>新建相册…</span>'; add.addEventListener("click",()=>{closeSheet();promptInput("新建相册","",v=>{if(v){createSystemAlbum(v,()=>onPick(v));}});}); list.appendChild(add);
+  };
+  $("#sheetTitle").textContent=title||"选择相册"; $("#sheet").classList.add("open"); render("");
+}
 function createSystemAlbum(name, cb){
   try{ BRIDGE.createAlbum(name); }catch(e){ toast("创建失败："+e); return; }
   addCreated(name);
@@ -669,6 +706,11 @@ function renderHome(){
   const box=$("#albums");
   box.className="";
   box.innerHTML="";
+  const resume=(()=>{try{return JSON.parse(localStorage.getItem("pp_resume_album")||"null");}catch(e){return null;}})();
+  const task=document.createElement("div"); task.className="tool-card";
+  task.innerHTML='<div class="ic" style="background:#2e58e8">✨</div><div class="tt"><div class="n">待筛选照片</div><div class="d">已审阅 '+reviewed.size+' 项 · '+(resume?'可继续上次整理':'从未整理开始')+'</div></div><span class="arrow">›</span>';
+  task.addEventListener("click",()=>{ if(resume&&resume.id){ openPhoneAlbum(resume.id,resume.name); }else{ openPhoneAlbum("unfiled","未整理"); } });
+  box.appendChild(task);
   const titleRow=h("手机相册");
   const hideBtn=document.createElement("button");
   hideBtn.className="hide-btn";
@@ -1305,9 +1347,7 @@ function moveSelected(){
   const list = visibleMedia().filter(m=>selection.has(itemKey(m)));
   if(!list.length) return;
   if(phoneAlbum===null){ toast("请先进入手机相册"); return; }
-  const opts = albumTargets().map(a=>({ic:"📁",t:a.name,f:()=>nativeMove(a.name,list)}));
-  opts.push({ic:"➕",t:"新建相册…",f:()=>promptInput("新建相册","",async v=>{ if(v){ createSystemAlbum(v, ()=>nativeMove(v,list)); } })});
-  sheet(opts,"移动到相册");
+  albumPicker("移动到相册",name=>nativeMove(name,list));
 }
 function nativeMove(name, list){
   if(!list || !list.length) return;
@@ -1330,7 +1370,9 @@ function nativeMove(name, list){
       if(ok) recordStats("move", ok);
       updateFabDone();
       if(ok>0){
+        rememberRecentAlbum(name);
         const okUris=new Set(res.filter(r=>r.ok).map(r=>r.uri));
+        removed.filter(m=>okUris.has(m.uri)).forEach(markReviewed);
         const sourceId=(phoneAlbum && phoneAlbum!=="unfiled") ? phoneAlbum : (removed[0]&&removed[0].albumId);
         if(sourceId) removeUrisFromCachedAlbum(sourceId,okUris);
         else phoneMediaCache.delete("unfiled");
@@ -1620,7 +1662,7 @@ function openViewer(list, idx, mode){
   updateViewerChrome();
   document.body.style.overflow="hidden";
   $("#vHint").classList.add("show");
-  $("#vHint").textContent = mode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
+  $("#vHint").textContent = mode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑整理 · ↓ 下滑返回";
   setTimeout(()=>{ if($("#viewer").classList.contains("open")) $("#vHint").classList.remove("show"); },2200);
 }
 function closeViewer(){
@@ -1878,7 +1920,7 @@ $("#vPreview").addEventListener("touchstart", e=>{
       const cur=vSlots.find(s=>s.idx===viewerIdx);
       if(cur) cur.el.classList.add("peek");
       $("#vHint").classList.add("show");
-      $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
+      $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑整理 · ↓ 下滑返回";
     }
   },360);
 },{passive:true});
@@ -1910,9 +1952,9 @@ $("#vPreview").addEventListener("touchmove", e=>{
     const zone=$("#vTrashZone");
     zone.classList.toggle("show", viewerMode==="normal" && cy<-70);
     $("#vHint").classList.toggle("show", !(cy<-70));
-    if(cy<-70) $("#vHint").textContent="松手移入回收站";
+    if(cy<-70) $("#vHint").textContent="松手移入相册";
     else if(cy>80) $("#vHint").textContent="松手返回";
-    else $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
+    else $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑整理 · ↓ 下滑返回";
   }
 },{passive:false});
 
@@ -1925,7 +1967,7 @@ $("#vPreview").addEventListener("touchend", e=>{
   $("#vHint").classList.remove("show");
   $("#vTrashZone").classList.remove("show");
   if(g0.long && g0.mode==="v"){
-    if(g0.dy<-70) doTrashCurrent();
+    if(g0.dy<-70) quickOrganizeCurrent();
     else if(g0.dy>70) closeViewer();
     else resetCurrentLift(true);
     return;
@@ -1937,7 +1979,7 @@ $("#vPreview").addEventListener("touchend", e=>{
     return;
   }
   if(g0.mode==="v"){
-    if(g0.dy<-70){ doTrashCurrent(); }        /* 立即删除：当前照片飞走 + 下一张马上出现，可连续上滑 */
+    if(g0.dy<-70){ quickOrganizeCurrent(); }
     else if(g0.dy>70){ closeViewer(); }
     else { resetCurrentLift(true); }
     return;
@@ -1963,10 +2005,13 @@ $("#vPreview").addEventListener("touchcancel", ()=>{
 });
 $("#vClose").addEventListener("click", closeViewer);
 $("#vDelete").addEventListener("click", ()=>{ doTrashCurrent(); });
+$("#vReview").addEventListener("click", ()=>{ const m=viewerList[viewerIdx]; if(m) toggleReviewed(m); });
 $("#vUndoCompact").addEventListener("click", ()=>{ if(moveUndoStack.length) undoLastMove(); else undoTrash(); });
 function syncViewerActions(){
   const undo=$("#vUndoCompact");
   if(undo) undo.hidden=!(moveUndoStack.length || lastTrashed);
+  const review=$("#vReview"), m=viewerList[viewerIdx];
+  if(review && m){ review.classList.toggle("on",reviewed.has(itemKey(m))); review.title=reviewed.has(itemKey(m))?"取消已审阅":"标记已审阅"; }
 }
 
 async function doTrashCurrent(){
@@ -1987,6 +2032,12 @@ async function doTrashCurrent(){
   const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   afterViewerRemove();
   if(viewerMode==="trash"){ await permanentDelete(m); } else { await trashOne(m); }
+}
+function quickOrganizeCurrent(){
+  if(viewerMode==="trash"){ doTrashCurrent(); return; }
+  if(defaultAlbum){ moveCurrentTo(defaultAlbum); return; }
+  resetCurrentLift(true);
+  albumPicker("选择整理相册",name=>moveCurrentTo(name));
 }
 
 /* ============ 底部弹层 / 对话框 ============ */
@@ -2094,6 +2145,9 @@ function renderMe(){
       <div class="set-row" id="rowTheme"><div class="tt"><div class="n">外观主题</div><div class="d" id="themeDesc">${themeDesc}</div></div>
         <div class="switch ${darkOn?'on':''}" id="swTheme"></div></div>
       <div class="set-row" id="rowVWork"><div class="tt"><div class="n">相册位置</div><div class="d">大图整理时相册按钮位置：${vworkPos==="bottom"?"下部·横滑":vworkPos==="left"?"左部·竖滑·照片靠右":"右部·竖滑·照片靠左"}</div></div><span class="arrow">›</span></div>
+      <div class="set-row" id="rowQueue"><div class="tt"><div class="n">待筛选排序</div><div class="d">${queueOrder==="new"?"最新照片优先":"最早照片优先"}</div></div><span class="arrow">›</span></div>
+      <div class="set-row" id="rowDefaultAlbum"><div class="tt"><div class="n">默认整理相册</div><div class="d">${defaultAlbum||"未设置"}</div></div><span class="arrow">›</span></div>
+      <div class="set-row" id="rowReviewed"><div class="tt"><div class="n">已审阅照片</div><div class="d">已标记 ${reviewed.size} 项</div></div><span class="arrow">清除</span></div>
     </div>
     <div class="set-h2">关于</div>
     <div class="set-group">
@@ -2117,6 +2171,12 @@ function renderMe(){
       {ic:"➡️",t:"右部（上下滑动·照片靠左）",f:()=>{vworkPos="right";localStorage.setItem("pp_vwork","right");applyVWork();renderMe();}}
     ],"相册位置");
   });
+  $("#rowQueue").addEventListener("click",()=>sheet([
+    {ic:"🆕",t:"最新照片优先",f:()=>{queueOrder="new";localStorage.setItem("pp_queue_order",queueOrder);renderMe();}},
+    {ic:"🕘",t:"最早照片优先",f:()=>{queueOrder="old";localStorage.setItem("pp_queue_order",queueOrder);renderMe();}}
+  ],"待筛选排序"));
+  $("#rowDefaultAlbum").addEventListener("click",()=>albumPicker("默认整理相册",name=>{defaultAlbum=name;localStorage.setItem("pp_default_album",name);renderMe();}));
+  $("#rowReviewed").addEventListener("click",()=>{ if(!reviewed.size){toast("暂无已审阅照片");return;} if(confirm("清除全部已审阅标记？照片不会被删除。")){reviewed.clear();localStorage.setItem("pp_reviewed","[]");renderMe();toast("已清除审阅标记");} });
   $("#swTheme").addEventListener("click", e=>{
     e.stopPropagation();
     const cur = currentTheme();

@@ -4,4 +4,4 @@ Android WebView 容器与 MediaStore 桥接源码。网页资源在 `app/src/mai
 
 构建要求：Android SDK Platform 34、Build Tools 34.0.0、JDK 17、Gradle 8.2。
 
-`assembleDebug` 生成 `app/build/outputs/apk/debug/app-debug.apk`。当前版本为 1.6.2（versionCode 42）。
+`assembleDebug` 生成 `app/build/outputs/apk/debug/app-debug.apk`。当前版本为 2.0.0（versionCode 50）。
