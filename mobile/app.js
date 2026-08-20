@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.6";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.7";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -672,10 +672,13 @@ function openPhoneAlbum(id, name){
       unfiledTotal=(st&&st.complete)?items.length:0;
     }
     renderPhotos();
-    if(queueOrder!=="new"){
+    /* “未整理”首页显示的是完整数量，进入后在后台补齐整个队列。
+       只加载首页 120 项时，扣除回收站项会让 968 看起来只剩 106。 */
+    if(id==="unfiled"||queueOrder!=="new"){
       readPhoneMediaAll(id,all=>{
         if(seq!==albumOpenSeq||phoneAlbum!==id) return;
         phoneMedia=all;
+        if(id==="unfiled") unfiledTotal=all.length;
         rememberAlbum(id,all,mediaStoreToken(true),{nextOffset:all.length,hasMore:false,complete:true});
         renderPhotos(true);
       });
@@ -1244,7 +1247,7 @@ function renderVirtualWindow(force){
     const g=phGroupByStart.get(i);
     if(g&&g.label){
       const sep=document.createElement("div");
-      sep.className="ph ph-month";
+      sep.className="ph-month";
       sep.textContent=g.label;
       sep.style.gridColumn="1 / -1";
       sep.style.height=PH_MONTH_H+"px";
