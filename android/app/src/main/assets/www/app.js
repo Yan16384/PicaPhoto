@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.8";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.9";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -580,6 +580,16 @@ function loadMorePhoneMedia(done){
   });
 }
 function readPhoneMediaAll(id,cb){
+  /* iQOO/vivo 的分页 MediaProvider 可能提前返回 hasMore=false。
+     未整理需与首页计数一致，因此优先走原生单次全量游标。 */
+  if(id==="unfiled"&&BRIDGE&&BRIDGE.readUnfiledAsync){
+    const cbName=nativeCallback("unfiledAll",raw=>{
+      let items=[];try{items=JSON.parse(raw||"[]");}catch(e){}
+      cb&&cb(filterPhoneItems(sortPhoneItems(items)));
+    });
+    BRIDGE.readUnfiledAsync(JSON.stringify([...hiddenAlbums]),cbName);
+    return;
+  }
   const canPage=id==="unfiled" ? (BRIDGE&&BRIDGE.readUnfiledPageAfterAsync)
                                   : (BRIDGE&&(BRIDGE.readMediaPageAfterAsync||BRIDGE.readMediaPageAsync));
   if(!canPage){ readPhoneMedia(id,cb); return; }
@@ -1055,20 +1065,43 @@ let thObserver=null;
 let thQueue=[];
 let thActive=0;
 const TH_MAX_CONCURRENT=3;
+const TH_TIMEOUT_MS=1200;
+const TH_MAX_ATTEMPTS=3;
+function finishThumbAttempt(uri,thumb){
+  const entry=thPending.get(uri);
+  if(!entry)return;
+  if(entry.timer){clearTimeout(entry.timer);entry.timer=null;}
+  if(entry.active){entry.active=false;thActive=Math.max(0,thActive-1);}
+  if(thumb&&thumb!=="null"){
+    entry.m.thumb=thumb;
+    if(entry.img&&entry.img.isConnected){
+      entry.img.onload=()=>{const cur=thPending.get(uri);if(cur===entry)thPending.delete(uri);};
+      entry.img.onerror=()=>{
+        entry.m.thumb=""; entry.img.onerror=null; entry.img.src=isVideo(entry.m)?VP_PLACEHOLDER:IP_PLACEHOLDER;
+        retryThumb(uri);
+      };
+      entry.img.src=thumb;
+    }else thPending.delete(uri);
+  }else retryThumb(uri);
+  drainThumbQueue();
+}
+function retryThumb(uri){
+  const entry=thPending.get(uri);
+  if(!entry)return;
+  if(entry.attempts>=TH_MAX_ATTEMPTS||!entry.img||!entry.img.isConnected){thPending.delete(uri);return;}
+  setTimeout(()=>{
+    const current=thPending.get(uri);
+    if(!current||current.active)return;
+    // A timed-out visible thumbnail must retry before new prefetch work.
+    // Appending it to a long queue can leave the placeholder on screen forever.
+    thQueue.unshift({uri,version:current.m.thumbVersion!=null?current.m.thumbVersion:-1});
+    drainThumbQueue();
+  },160*entry.attempts);
+}
 window.__thumbCb=obj=>{
-  thActive=Math.max(0,thActive-1);
   try{
     const r=JSON.parse(obj||"{}");
-    if(r&&r.uri){
-      const entry=thPending.get(r.uri);
-      if(entry){
-        if(r.thumb&&r.thumb!=="null"){
-          entry.m.thumb=r.thumb;
-          if(entry.img&&entry.img.isConnected) entry.img.src=r.thumb;
-        }
-        thPending.delete(r.uri);
-      }
-    }
+    if(r&&r.uri)finishThumbAttempt(r.uri,r.thumb||"");
   }catch(e){}
   drainThumbQueue();
 };
@@ -1082,16 +1115,17 @@ function requestNativeThumb(job){
 function drainThumbQueue(){
   while(thActive<TH_MAX_CONCURRENT&&thQueue.length){
     const job=thQueue.shift();
-    if(!thPending.has(job.uri)) continue;
+    const entry=thPending.get(job.uri);
+    if(!entry||entry.active) continue;
+    entry.active=true;entry.attempts=(entry.attempts||0)+1;
     thActive++;
+    entry.timer=setTimeout(()=>finishThumbAttempt(job.uri,""),TH_TIMEOUT_MS);
     try{
       if(!requestNativeThumb(job)){
-        thActive=Math.max(0,thActive-1);
-        thPending.delete(job.uri);
+        finishThumbAttempt(job.uri,"");
       }
     }catch(e){
-      thActive=Math.max(0,thActive-1);
-      thPending.delete(job.uri);
+      finishThumbAttempt(job.uri,"");
     }
   }
 }
@@ -1099,7 +1133,7 @@ function ensureMediaThumb(m,el){
   if(!m||!m.uri||m.thumb||thPending.has(m.uri)) return;
   const img=el?el.querySelector("img"):null;
   if(!img) return;
-  thPending.set(m.uri,{m,img});
+  thPending.set(m.uri,{m,img,attempts:0,active:false,timer:null});
   thQueue.push({uri:m.uri,version:m.thumbVersion!=null?m.thumbVersion:-1});
   drainThumbQueue();
 }
@@ -1121,7 +1155,9 @@ function stopPhotoBackgroundWork(){
   if(phScrollRaf){ cancelAnimationFrame(phScrollRaf); phScrollRaf=0; }
   if(thObserver) thObserver.disconnect();
   thQueue.length=0;
+  thPending.forEach(e=>{if(e.timer)clearTimeout(e.timer);});
   thPending.clear();
+  thActive=0;
 }
 
 function buildPhotoEl(m,idx,selNo){

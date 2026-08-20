@@ -892,24 +892,84 @@ public class MediaBridge {
 
     @JavascriptInterface
     public void readUnfiledAsync(final String hiddenJson, final String cb) {
-        io.execute(() -> {
-            JSONArray all = new JSONArray();
-            long beforeDate = -1L, beforeId = -1L;
-            int guard = 0;
+        io.execute(() -> callJs(cb, readUnfiledAllSync(hiddenJson)));
+    }
+
+    /* 完整队列不使用分页：部分 vivo/iQOO MediaProvider 会在 keyset 分页中提前结束，
+       导致首页 COUNT 正确但整理页少数百张。这里只读元数据，缩略图仍按可见区加载。 */
+    private String readUnfiledAllSync(String hiddenJson) {
+        JSONArray arr = new JSONArray();
+        Cursor c = null;
+        try {
+            boolean img = hasImagePermission(), vid = hasVideoPermission();
+            if (!img && !vid) return arr.toString();
+            Uri files = Build.VERSION.SDK_INT >= 29
+                    ? MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    : MediaStore.Files.getContentUri("external");
+            String versionCol = Build.VERSION.SDK_INT >= 30
+                    ? MediaStore.MediaColumns.GENERATION_MODIFIED : MediaStore.MediaColumns.DATE_MODIFIED;
+            String[] projection = {
+                    MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE,
+                    MediaStore.Files.FileColumns.MEDIA_TYPE, versionCol
+            };
+            List<String> args = new ArrayList<>();
+            StringBuilder sel = new StringBuilder("(")
+                    .append(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME).append(" IS NULL OR ")
+                    .append(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME).append("=''");
             try {
-                while (guard++ < 10000) {
-                    JSONObject page = new JSONObject(readUnfiledPageAfterSync(hiddenJson, beforeDate, beforeId, 400));
-                    JSONArray items = page.optJSONArray("items");
-                    if (items != null) for (int i = 0; i < items.length(); i++) all.put(items.get(i));
-                    if (!page.optBoolean("hasMore", false)) break;
-                    long nd = page.optLong("nextBeforeDate", -1L);
-                    long ni = page.optLong("nextBeforeId", -1L);
-                    if (nd < 0 || ni < 0 || (nd == beforeDate && ni == beforeId)) break;
-                    beforeDate = nd; beforeId = ni;
+                JSONArray hid = new JSONArray(hiddenJson == null ? "[]" : hiddenJson);
+                if (hid.length() > 0) {
+                    sel.append(" OR ").append(MediaStore.MediaColumns.BUCKET_ID).append(" IN (");
+                    for (int i = 0; i < hid.length(); i++) {
+                        if (i > 0) sel.append(",");
+                        sel.append("?"); args.add(hid.getString(i));
+                    }
+                    sel.append(")");
                 }
             } catch (Exception ignored) {}
-            callJs(cb, all.toString());
-        });
+            sel.append(") AND (");
+            if (img) {
+                sel.append(MediaStore.Files.FileColumns.MEDIA_TYPE).append("=?");
+                args.add(String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE));
+            }
+            if (vid) {
+                if (img) sel.append(" OR ");
+                sel.append(MediaStore.Files.FileColumns.MEDIA_TYPE).append("=?");
+                args.add(String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO));
+            }
+            sel.append(")");
+            String order = MediaStore.MediaColumns.DATE_ADDED + " DESC, " + MediaStore.MediaColumns._ID + " DESC";
+            c = activity.getContentResolver().query(files, projection, sel.toString(), args.toArray(new String[0]), order);
+            if (c == null) return arr.toString();
+            int ci=c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+            int cn=c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+            int cm=c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
+            int cb=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_ID);
+            int cbn=c.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
+            int cd=c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED);
+            int cs=c.getColumnIndex(MediaStore.MediaColumns.SIZE);
+            int ct=c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE);
+            int cv=c.getColumnIndex(versionCol);
+            while(c.moveToNext()) {
+                long id=c.getLong(ci); int mt=c.getInt(ct);
+                boolean isImage=mt==MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
+                Uri base=isImage?MediaStore.Images.Media.EXTERNAL_CONTENT_URI:MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                JSONObject o=new JSONObject();
+                o.put("uri",ContentUris.withAppendedId(base,id).toString());
+                String name=c.getString(cn),mime=c.getString(cm);
+                o.put("name",name==null?"":name); o.put("mime",mime==null?"":mime); o.put("isVideo",!isImage);
+                if(cs>=0&&!c.isNull(cs))o.put("size",c.getLong(cs));
+                o.put("dateAdded",(cd>=0&&!c.isNull(cd))?c.getLong(cd):0L);
+                if(cv>=0&&!c.isNull(cv))o.put("thumbVersion",c.getLong(cv));
+                if(cb>=0&&!c.isNull(cb))o.put("albumId",c.getString(cb));
+                if(cbn>=0&&!c.isNull(cbn)){JSONArray names=new JSONArray();names.put(c.getString(cbn));o.put("albumNames",names);}
+                arr.put(o);
+            }
+        } catch (Exception ignored) {
+        } finally { try { if(c!=null)c.close(); } catch(Exception ignored){} }
+        return arr.toString();
     }
 
     /** 首页只需要数量，不解码缩略图也不构造媒体 JSON。 */

@@ -6,8 +6,8 @@ android {
         applicationId "com.picaphoto.app"
         minSdk 24
         targetSdk 34
-        versionCode 58
-        versionName "2.0.8"
+        versionCode 59
+        versionName "2.0.9"
     }
     buildTypes { release { minifyEnabled false } }
     buildFeatures { buildConfig true }
