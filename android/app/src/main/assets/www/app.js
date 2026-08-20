@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.2";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.3";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -81,6 +81,7 @@ let vworkPos = localStorage.getItem("pp_vwork")||"bottom";   // bottom | left | 
 let queueOrder = localStorage.getItem("pp_queue_order")||"new";
 let defaultAlbum = localStorage.getItem("pp_default_album")||"";
 let reviewQueueMode = false;
+let writeBatchKey = "";
 function applyVWork(){ const v=$("#viewer"); if(v) v.dataset.vwork=vworkPos; }
 
 /* ============ 工具 ============ */
@@ -620,6 +621,25 @@ window.__permissionChanged=()=>{
   refreshPhoneAlbums(true);
   if(tab==="org" && orgSub==="home") renderHome();
 };
+window.__mediaManageChanged=()=>{
+  writeBatchKey="";
+  if(tab==="org" && orgSub==="home") renderHome();
+  if(tab==="me") renderMe();
+};
+function canManageMedia(){ try{return !!(BRIDGE&&BRIDGE.canManageMedia&&BRIDGE.canManageMedia());}catch(e){return false;} }
+function requestFullPhotoAccess(){
+  if(!BRIDGE||!BRIDGE.requestManageMedia) return;
+  BRIDGE.requestManageMedia();
+}
+function requestWriteBatch(items){
+  if(!BRIDGE||!BRIDGE.requestWriteBatch||!Array.isArray(items)) return;
+  const uris=[...new Set(items.map(m=>m&&m.uri).filter(u=>u&&u.startsWith("content:")))].slice(0,1000);
+  if(!uris.length) return;
+  const key=uris.length+":"+uris[0]+":"+uris[uris.length-1];
+  if(writeBatchKey===key) return;
+  const cb=nativeCallback("writebatch",raw=>{ if(String(raw)==="true") writeBatchKey=key; });
+  try{ BRIDGE.requestWriteBatch(JSON.stringify(uris),cb); }catch(e){}
+}
 function openPhoneAlbum(id, name, openReviewQueue){
   if(typeof openReviewQueue==="boolean") reviewQueueMode=openReviewQueue;
   const seq=++albumOpenSeq;
@@ -733,6 +753,11 @@ function renderHome(){
     box.appendChild(p);
     p.querySelector("#btnPerm").addEventListener("click", requestPhonePermission);
   } else if(BRIDGE){
+    if(BRIDGE.supportsManageMedia && BRIDGE.supportsManageMedia() && !canManageMedia()){
+      const access=document.createElement("div"); access.className="tool-card";
+      access.innerHTML='<div class="ic" style="background:#16a36a">🔐</div><div class="tt"><div class="n">申请相册访问权限</div><div class="d">开启一次后，整理照片不再逐张询问</div></div><span class="arrow">›</span>';
+      access.addEventListener("click",requestFullPhotoAccess); box.appendChild(access);
+    }
     const visibleAlbs = phoneAlbums.filter(a=>!hiddenAlbums.has(a.id));
     const g=document.createElement("div"); g.className="pgalb-grid";
     visibleAlbs.forEach((a,ai)=>{
@@ -1665,9 +1690,10 @@ function openViewer(list, idx, mode){
   buildSlides();
   setTrack(0,0,1,false);
   updateViewerChrome();
+  if(viewerMode==="normal") requestWriteBatch(viewerList);
   document.body.style.overflow="hidden";
   $("#vHint").classList.add("show");
-  $("#vHint").textContent = mode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑整理 · ↓ 下滑返回";
+  $("#vHint").textContent = mode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
   setTimeout(()=>{ if($("#viewer").classList.contains("open")) $("#vHint").classList.remove("show"); },2200);
 }
 function closeViewer(){
@@ -2116,6 +2142,8 @@ function renderMe(){
   const tot=storageBytes();
   const todayN=stats.organizedByDay[todayKey()]||0;
   const themeDesc = theme==="auto" ? "跟随系统" : (theme==="dark" ? "深色" : "浅色");
+  const manageSupported=!!(BRIDGE&&BRIDGE.supportsManageMedia&&BRIDGE.supportsManageMedia());
+  const manageDesc=manageSupported ? (canManageMedia()?"已开启，不再逐张询问":"未开启，点按申请") : "Android 11 将按整理队列批量申请";
   s.innerHTML=`
     <div class="me-head">
       <img src="icon-192.png" alt="">
@@ -2143,6 +2171,7 @@ function renderMe(){
     </div>
     <div class="set-h2">设置</div>
     <div class="set-group">
+      <div class="set-row" id="rowManageMedia"><div class="tt"><div class="n">申请相册访问权限</div><div class="d">${manageDesc}</div></div><span class="arrow">${canManageMedia()?"已开启":"›"}</span></div>
       <div class="set-row" id="rowTheme"><div class="tt"><div class="n">外观主题</div><div class="d" id="themeDesc">${themeDesc}</div></div>
         <div class="switch ${darkOn?'on':''}" id="swTheme"></div></div>
       <div class="set-row" id="rowVWork"><div class="tt"><div class="n">相册位置</div><div class="d">大图整理时相册按钮位置：${vworkPos==="bottom"?"下部·横滑":vworkPos==="left"?"左部·竖滑·照片靠右":"右部·竖滑·照片靠左"}</div></div><span class="arrow">›</span></div>
@@ -2159,6 +2188,10 @@ function renderMe(){
   $("#calPrev").addEventListener("click", ()=>{ calMonth--; if(calMonth<0){ calMonth=11; calYear--; } renderCalendar(); });
   $("#calNext").addEventListener("click", ()=>{ calMonth++; if(calMonth>11){ calMonth=0; calYear++; } renderCalendar(); });
   renderCalendar();
+  $("#rowManageMedia").addEventListener("click",()=>{
+    if(canManageMedia()){toast("相册访问权限已开启");return;}
+    if(manageSupported) requestFullPhotoAccess(); else toast("进入照片整理时会一次申请当前队列权限");
+  });
   /* 外观主题：点行弹出三选（跟随系统/浅色/深色）；点开关快速切换深/浅 */
   $("#rowTheme").addEventListener("click", ()=>{
     sheet([{ic:"🌗",t:"跟随系统",f:()=>{theme="auto";localStorage.setItem("pp_theme","auto");applyTheme();renderMe();}},

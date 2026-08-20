@@ -62,11 +62,14 @@ public class MediaBridge {
 
     public static final int DELETE_REQ = 2002;
     public static final int WRITE_REQ = 2003;
+    public static final int WRITE_BATCH_REQ = 2004;
+    public static final int MANAGE_MEDIA_PREP_REQ = 2005;
     private long pendingId = -1;
     private List<Uri> pendingDeleteUris = new ArrayList<>();
     private File lastApk = null;
     private BroadcastReceiver receiver = null;
     private PendingMove pendingMove = null;
+    private String pendingWriteBatchCallback = null;
 
     private static final class PendingMove {
         final String jsonUris;
@@ -165,11 +168,96 @@ public class MediaBridge {
         if (Build.VERSION.SDK_INT < 23) return;
         activity.runOnUiThread(() -> {
             if (Build.VERSION.SDK_INT >= 33) {
-                activity.requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO}, REQ_PERM);
+                activity.requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO,
+                        Manifest.permission.ACCESS_MEDIA_LOCATION}, REQ_PERM);
             } else {
-                activity.requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_PERM);
+                activity.requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.ACCESS_MEDIA_LOCATION}, REQ_PERM);
             }
         });
+    }
+
+    @JavascriptInterface
+    public boolean supportsManageMedia() {
+        if (Build.VERSION.SDK_INT < 31) return false;
+        Intent intent = new Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA,
+                Uri.parse("package:" + activity.getPackageName()));
+        return intent.resolveActivity(activity.getPackageManager()) != null;
+    }
+
+    @JavascriptInterface
+    public boolean canManageMedia() {
+        return Build.VERSION.SDK_INT >= 31 && MediaStore.canManageMedia(activity);
+    }
+
+    @JavascriptInterface
+    public void requestManageMedia() {
+        if (Build.VERSION.SDK_INT < 31) return;
+        activity.runOnUiThread(() -> {
+            if (activity.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                activity.requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MANAGE_MEDIA_PREP_REQ);
+                return;
+            }
+            launchManageMediaSettings();
+        });
+    }
+
+    public void onPermissionResult(int requestCode) {
+        if (requestCode == MANAGE_MEDIA_PREP_REQ) {
+            if (activity.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                launchManageMediaSettings();
+            } else {
+                toast("需要允许相册位置信息访问，才能免除重复确认");
+            }
+        }
+    }
+
+    private void launchManageMediaSettings() {
+        if (Build.VERSION.SDK_INT < 31) return;
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA,
+                        Uri.parse("package:" + activity.getPackageName()));
+                activity.startActivity(intent);
+            } catch (Exception e) {
+                toast("此系统未提供相册管理特殊访问");
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void requestWriteBatch(final String jsonUris, final String cb) {
+        if (Build.VERSION.SDK_INT < 30) { callJs(cb, "true"); return; }
+        io.execute(() -> {
+            final ArrayList<Uri> uris = new ArrayList<>();
+            try {
+                JSONArray arr = new JSONArray(jsonUris);
+                int limit = Math.min(arr.length(), 1000);
+                for (int i = 0; i < limit; i++) {
+                    Uri uri = Uri.parse(arr.getString(i));
+                    int granted = activity.checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(),
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    if (granted != PackageManager.PERMISSION_GRANTED) uris.add(uri);
+                }
+            } catch (Exception e) { callJs(cb, "false"); return; }
+            if (uris.isEmpty()) { callJs(cb, "true"); return; }
+            activity.runOnUiThread(() -> {
+                synchronized (this) {
+                    if (pendingWriteBatchCallback != null || pendingMove != null) { callJs(cb, "false"); return; }
+                    pendingWriteBatchCallback = cb;
+                }
+                try {
+                    PendingIntent request = MediaStore.createWriteRequest(activity.getContentResolver(), uris);
+                    activity.startIntentSenderForResult(request.getIntentSender(), WRITE_BATCH_REQ, null, 0, 0, 0);
+                } catch (Exception e) { finishWriteBatch(false); }
+            });
+        });
+    }
+
+    private void finishWriteBatch(boolean granted) {
+        final String cb;
+        synchronized (this) { cb = pendingWriteBatchCallback; pendingWriteBatchCallback = null; }
+        if (cb != null) callJs(cb, granted ? "true" : "false");
     }
 
     @JavascriptInterface
@@ -1051,6 +1139,7 @@ public class MediaBridge {
 
     public void onActivityResult(int requestCode, int resultCode) {
         if (requestCode == WRITE_REQ) finishPendingMove(resultCode == Activity.RESULT_OK);
+        if (requestCode == WRITE_BATCH_REQ) finishWriteBatch(resultCode == Activity.RESULT_OK);
     }
 
     private void finishPendingMove(boolean granted) {

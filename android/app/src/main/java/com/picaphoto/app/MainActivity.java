@@ -173,14 +173,15 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == MediaBridge.REQ_PERM && web != null) {
+        if (bridge != null) bridge.onPermissionResult(requestCode);
+        if ((requestCode == MediaBridge.REQ_PERM || requestCode == MediaBridge.MANAGE_MEDIA_PREP_REQ) && web != null) {
             web.evaluateJavascript("if(window.__permissionChanged){window.__permissionChanged();}", null);
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == MediaBridge.WRITE_REQ) {
+        if (requestCode == MediaBridge.WRITE_REQ || requestCode == MediaBridge.WRITE_BATCH_REQ) {
             if (bridge != null) bridge.onActivityResult(requestCode, resultCode);
             return;
         }
@@ -191,6 +192,14 @@ public class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) {
+            web.evaluateJavascript("if(window.__mediaManageChanged){window.__mediaManageChanged();}", null);
+        }
     }
 
     @Override

@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+    <!-- Android 12+：用户可一次授予相册管理特殊访问；位置权限是免重复写确认的系统前置条件 -->
+    <uses-permission android:name="android.permission.MANAGE_MEDIA"/>
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="PicaPhoto"
