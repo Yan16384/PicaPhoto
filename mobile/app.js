@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.0";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.1";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -67,7 +67,7 @@ let selection = new Set();
 let multi = false;
 let theme = localStorage.getItem("pp_theme") || "auto";
 let urls = new Map();
-let lastTrashed = null;
+let trashUndoStack = [];
 let moveUndoStack = [];
 let favs = new Set(JSON.parse(localStorage.getItem("pp_favs")||"[]"));
 let reviewed = new Set(JSON.parse(localStorage.getItem("pp_reviewed")||"[]"));
@@ -80,6 +80,7 @@ gridCols = Math.max(2, Math.min(6, gridCols));
 let vworkPos = localStorage.getItem("pp_vwork")||"bottom";   // bottom | left | right
 let queueOrder = localStorage.getItem("pp_queue_order")||"new";
 let defaultAlbum = localStorage.getItem("pp_default_album")||"";
+let reviewQueueMode = false;
 function applyVWork(){ const v=$("#viewer"); if(v) v.dataset.vwork=vworkPos; }
 
 /* ============ 工具 ============ */
@@ -619,7 +620,8 @@ window.__permissionChanged=()=>{
   refreshPhoneAlbums(true);
   if(tab==="org" && orgSub==="home") renderHome();
 };
-function openPhoneAlbum(id, name){
+function openPhoneAlbum(id, name, openReviewQueue){
+  if(typeof openReviewQueue==="boolean") reviewQueueMode=openReviewQueue;
   const seq=++albumOpenSeq;
   stopPhotoBackgroundWork();
   phGridAlbum=null; phItems=[]; phItemMap=new Map(); phLayoutGroups=[]; phGroupByStart=new Map(); phTotalHeight=0; phWindowStart=phWindowEnd=-1; phEls=new Map();
@@ -643,6 +645,7 @@ function openPhoneAlbum(id, name){
     applyGridCols(false);
   }
   showOrg();
+  if(reviewQueueMode) toast("待筛选队列：已审阅照片已隐藏");
 
   readPhoneMedia(id, items=>{
     if(seq!==albumOpenSeq || phoneAlbum!==id) return;
@@ -709,7 +712,7 @@ function renderHome(){
   const resume=(()=>{try{return JSON.parse(localStorage.getItem("pp_resume_album")||"null");}catch(e){return null;}})();
   const task=document.createElement("div"); task.className="tool-card";
   task.innerHTML='<div class="ic" style="background:#2e58e8">✨</div><div class="tt"><div class="n">待筛选照片</div><div class="d">已审阅 '+reviewed.size+' 项 · '+(resume?'可继续上次整理':'从未整理开始')+'</div></div><span class="arrow">›</span>';
-  task.addEventListener("click",()=>{ if(resume&&resume.id){ openPhoneAlbum(resume.id,resume.name); }else{ openPhoneAlbum("unfiled","未整理"); } });
+  task.addEventListener("click",()=>{ if(resume&&resume.id){ openPhoneAlbum(resume.id,resume.name,true); }else{ openPhoneAlbum("unfiled","未整理",true); } });
   box.appendChild(task);
   const titleRow=h("手机相册");
   const hideBtn=document.createElement("button");
@@ -721,7 +724,7 @@ function renderHome(){
   if(BRIDGE && BRIDGE.readUnfiledAsync){
     const uf=document.createElement("div"); uf.className="tool-card";
     uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理</div><div class="d">'+(hiddenAlbums.size?('隐藏相册 '+hiddenAlbums.size+' 个 · '):'')+'没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
-    uf.addEventListener("click", ()=>{ openPhoneAlbum("unfiled","未整理"); });
+    uf.addEventListener("click", ()=>{ openPhoneAlbum("unfiled","未整理",false); });
     box.appendChild(uf);
   }
   if(BRIDGE && !BRIDGE.hasPermission()){
@@ -737,7 +740,7 @@ function renderHome(){
       c.dataset.albumId=a.id;
       c.innerHTML='<div class="cover">'+(a.cover?'<img loading="lazy" decoding="async" src="'+a.cover+'" alt="">':'<div class="cover-ph">'+escapeHtml((a.name||"相").charAt(0))+'</div>')+'</div><div class="name">'+escapeHtml(a.name)+'</div><div class="cnt">'+a.count+' 项</div>';
       if(ai<12) c.style.animationDelay=(ai*18)+"ms"; else c.classList.remove("anim-pop");
-      c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name); });
+      c.addEventListener("click", ()=>{ openPhoneAlbum(a.id, a.name, false); });
       bindLong(c, ()=>phoneAlbumMenu(a));
       g.appendChild(c);
     });
@@ -830,7 +833,10 @@ function confirmDeletePhoneAlbum(a){
   });
 }
 function openPhotosView(albumId){ currentAlbum=albumId; orgSub="photos"; exitMulti(); showOrg(); }
-function visibleMedia(){ return phoneAlbum!==null ? phoneMedia : (currentAlbum===null?media:media.filter(m=>m.album===currentAlbum)); }
+function visibleMedia(){
+  const base=phoneAlbum!==null ? phoneMedia : (currentAlbum===null?media:media.filter(m=>m.album===currentAlbum));
+  return reviewQueueMode ? base.filter(m=>!reviewed.has(itemKey(m))) : base;
+}
 
 /* 下拉刷新（整理首页） */
 (function(){
@@ -1520,7 +1526,7 @@ async function trashPhone(m){
   trashedUris.add(m.uri);
   const idx=phoneMedia.indexOf(m); if(idx>=0) phoneMedia.splice(idx,1);
   markPhDirty();
-  lastTrashed={type:"phone", uri:m.uri, id:rec.id};
+  trashUndoStack.push({type:"phone", uri:m.uri, id:rec.id});
   recordStats("trash",1);
 }
 async function restoreFromTrash(m){
@@ -1617,7 +1623,7 @@ async function trashOne(m){
     await storePut("trash",tr);
     await storeDel("media", m.id);
     const idx=media.indexOf(m); if(idx>=0) media.splice(idx,1);
-    lastTrashed={type:"app", item:tr};
+    trashUndoStack.push({type:"app", item:tr});
     recordStats("trash",1);
     toastTrash();
   }
@@ -1625,8 +1631,8 @@ async function trashOne(m){
 }
 function toastTrash(){ toast("已移入回收站","撤销",()=>undoTrash()); }
 async function undoTrash(){
-  if(!lastTrashed) return;
-  const t=lastTrashed; lastTrashed=null;
+  const t=trashUndoStack.pop();
+  if(!t) return;
   if(t.type==="phone"){
     await storeDel("trash", t.id || ("p_"+t.uri));
     trashedUris.delete(t.uri);
@@ -2009,7 +2015,7 @@ $("#vReview").addEventListener("click", ()=>{ const m=viewerList[viewerIdx]; if(
 $("#vUndoCompact").addEventListener("click", ()=>{ if(moveUndoStack.length) undoLastMove(); else undoTrash(); });
 function syncViewerActions(){
   const undo=$("#vUndoCompact");
-  if(undo) undo.hidden=!(moveUndoStack.length || lastTrashed);
+  if(undo) undo.hidden=!(moveUndoStack.length || trashUndoStack.length);
   const review=$("#vReview"), m=viewerList[viewerIdx];
   if(review && m){ review.classList.toggle("on",reviewed.has(itemKey(m))); review.title=reviewed.has(itemKey(m))?"取消已审阅":"标记已审阅"; }
 }
