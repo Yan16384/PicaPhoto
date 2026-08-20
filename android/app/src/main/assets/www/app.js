@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.1";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.2";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -1368,7 +1368,6 @@ function nativeMove(name, list){
     }
     appendPhonePageToGrid();
     exitMulti();
-    toast("正在移入「"+name+"」"+list.length+" 项…");
     if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ for(const m of removed) phoneMedia.push(m); renderPhotos(true); toast("移动失败"); return; }
     const moveCb=nativeCallback("move", resJson => {
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
@@ -1871,7 +1870,6 @@ async function moveCurrentTo(name){
     const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
     const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
     afterViewerRemove();
-    toast("正在移入「"+name+"」…");
     if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移动失败"); return; }
     try{
       const mcCb=nativeCallback("movecurrent", resJson => {
@@ -1958,9 +1956,9 @@ $("#vPreview").addEventListener("touchmove", e=>{
     const zone=$("#vTrashZone");
     zone.classList.toggle("show", viewerMode==="normal" && cy<-70);
     $("#vHint").classList.toggle("show", !(cy<-70));
-    if(cy<-70) $("#vHint").textContent="松手移入相册";
+    if(cy<-70) $("#vHint").textContent="松手移入回收站";
     else if(cy>80) $("#vHint").textContent="松手返回";
-    else $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑整理 · ↓ 下滑返回";
+    else $("#vHint").textContent = viewerMode==="trash" ? "↑ 上滑删除 · ↓ 下滑返回" : "↑ 上滑回收 · ↓ 下滑返回";
   }
 },{passive:false});
 
@@ -2040,10 +2038,7 @@ async function doTrashCurrent(){
   if(viewerMode==="trash"){ await permanentDelete(m); } else { await trashOne(m); }
 }
 function quickOrganizeCurrent(){
-  if(viewerMode==="trash"){ doTrashCurrent(); return; }
-  if(defaultAlbum){ moveCurrentTo(defaultAlbum); return; }
-  resetCurrentLift(true);
-  albumPicker("选择整理相册",name=>moveCurrentTo(name));
+  doTrashCurrent();
 }
 
 /* ============ 底部弹层 / 对话框 ============ */

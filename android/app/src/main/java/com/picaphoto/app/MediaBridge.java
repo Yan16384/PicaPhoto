@@ -72,10 +72,12 @@ public class MediaBridge {
         final String jsonUris;
         final String relativePath;
         final String callback;
-        PendingMove(String jsonUris, String relativePath, String callback) {
+        final String firstResults;
+        PendingMove(String jsonUris, String relativePath, String callback, String firstResults) {
             this.jsonUris = jsonUris;
             this.relativePath = relativePath;
             this.callback = callback;
+            this.firstResults = firstResults;
         }
     }
 
@@ -920,7 +922,8 @@ public class MediaBridge {
                 ContentValues v = new ContentValues();
                 v.put(MediaStore.MediaColumns.RELATIVE_PATH, rel);
                 return activity.getContentResolver().update(src, v, null, null) > 0;
-            } catch (Exception e) { return false; }
+            } catch (SecurityException e) { throw e; }
+              catch (Exception e) { return false; }
         }
         try {
             Cursor c = activity.getContentResolver().query(src, new String[]{MediaStore.MediaColumns.DATA}, null, null, null);
@@ -1003,22 +1006,25 @@ public class MediaBridge {
             io.execute(() -> callJs(cb, moveToPathSync(jsonUris, relativePath)));
             return;
         }
-        final ArrayList<Uri> uris = new ArrayList<>();
-        try {
-            JSONArray arr = new JSONArray(jsonUris);
-            for (int i = 0; i < arr.length(); i++) uris.add(Uri.parse(arr.getString(i)));
-        } catch (Exception e) {
-            callJs(cb, "[]");
-            return;
-        }
-        if (uris.isEmpty()) { callJs(cb, "[]"); return; }
+        /* First try RELATIVE_PATH directly.  A granted URI (or media owned by this app)
+           must not show another system confirmation on every move. */
+        io.execute(() -> {
+            String first = moveToPathSync(jsonUris, relativePath);
+            ArrayList<Uri> denied = permissionUris(first);
+            if (denied.isEmpty()) { callJs(cb, first); return; }
+            requestWritePermission(jsonUris, relativePath, cb, first, denied);
+        });
+    }
+
+    private void requestWritePermission(final String jsonUris, final String relativePath, final String cb,
+                                        final String firstResults, final ArrayList<Uri> uris) {
         activity.runOnUiThread(() -> {
             synchronized (this) {
                 if (pendingMove != null) {
                     callJs(cb, errorResults(jsonUris, "move_in_progress"));
                     return;
                 }
-                pendingMove = new PendingMove(jsonUris, relativePath, cb);
+                pendingMove = new PendingMove(jsonUris, relativePath, cb, firstResults);
             }
             try {
                 PendingIntent request = MediaStore.createWriteRequest(activity.getContentResolver(), uris);
@@ -1031,6 +1037,18 @@ public class MediaBridge {
         });
     }
 
+    private ArrayList<Uri> permissionUris(String results) {
+        ArrayList<Uri> uris = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONArray(results);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject r = arr.getJSONObject(i);
+                if ("needs_write_permission".equals(r.optString("err"))) uris.add(Uri.parse(r.getString("uri")));
+            }
+        } catch (Exception ignored) {}
+        return uris;
+    }
+
     public void onActivityResult(int requestCode, int resultCode) {
         if (requestCode == WRITE_REQ) finishPendingMove(resultCode == Activity.RESULT_OK);
     }
@@ -1039,9 +1057,24 @@ public class MediaBridge {
         final PendingMove move;
         synchronized (this) { move = pendingMove; pendingMove = null; }
         if (move == null) return;
-        io.execute(() -> callJs(move.callback, granted
-                ? moveToPathSync(move.jsonUris, move.relativePath)
-                : errorResults(move.jsonUris, "write_permission_denied")));
+        io.execute(() -> {
+            String retried = granted ? moveToPathSync(move.jsonUris, move.relativePath)
+                                     : errorResults(move.jsonUris, "write_permission_denied");
+            callJs(move.callback, mergeMoveResults(move.firstResults, retried));
+        });
+    }
+
+    private String mergeMoveResults(String first, String retried) {
+        try {
+            JSONArray a = new JSONArray(first), b = new JSONArray(retried), out = new JSONArray();
+            java.util.HashMap<String, JSONObject> retriedByUri = new java.util.HashMap<>();
+            for (int i = 0; i < b.length(); i++) { JSONObject r = b.getJSONObject(i); retriedByUri.put(r.optString("uri"), r); }
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject r = a.getJSONObject(i);
+                out.put("needs_write_permission".equals(r.optString("err")) ? retriedByUri.get(r.optString("uri")) : r);
+            }
+            return out.toString();
+        } catch (Exception ignored) { return retried; }
     }
 
     private String errorResults(String jsonUris, String reason) {
@@ -1074,7 +1107,8 @@ public class MediaBridge {
                     r.put("ok", ok);
                     if (oldPath != null) r.put("from", oldPath);
                     if (!ok) r.put("err", "move_failed");
-                } catch (Exception e) { r.put("ok", false); r.put("err", String.valueOf(e)); }
+                } catch (SecurityException e) { r.put("ok", false); r.put("err", "needs_write_permission"); }
+                  catch (Exception e) { r.put("ok", false); r.put("err", String.valueOf(e)); }
                 out.put(r);
             }
         } catch (Exception ignored) {}
