@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.5";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.6";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -742,9 +742,11 @@ function renderHome(){
   box.appendChild(titleRow);
   if(BRIDGE && BRIDGE.readUnfiledAsync){
     const uf=document.createElement("div"); uf.className="tool-card";
-    uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理</div><div class="d">'+(hiddenAlbums.size?('隐藏相册 '+hiddenAlbums.size+' 个 · '):'')+'没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
+    const countText=unfiledHomeCount===null?"计算中…":(visibleUnfiledHomeCount()+" 张");
+    uf.innerHTML='<div class="ic" style="background:#7b5cd6">📂</div><div class="tt"><div class="n">未整理 · <span id="unfiledCount">'+countText+'</span></div><div class="d">'+(hiddenAlbums.size?('隐藏相册 '+hiddenAlbums.size+' 个 · '):'')+'没有相册归属的照片，点按移入相册</div></div><span class="arrow">›</span>';
     uf.addEventListener("click", ()=>{ openPhoneAlbum("unfiled","未整理",false); });
     box.appendChild(uf);
+    refreshUnfiledHomeCount(false);
   }
   if(BRIDGE && !BRIDGE.hasPermission()){
     const p=document.createElement("div"); p.className="full empty";
@@ -1530,9 +1532,33 @@ let trashedUris = new Set();   // 已回收的手机相册 uri，用于从相册
 let pendingMoves = new Set();  // kept empty: moves are true background moves now
 let hiddenAlbums = new Set(JSON.parse(localStorage.getItem("pp_hidden")||"[]"));
 let unfiledTotal = 0;   // 未整理视图加载总数（已整理 = 总数 - 当前剩余）  // 隐藏相册 id → 照片计入“未整理”
+let unfiledHomeCount = null;
+let unfiledCountKey = "";
+let unfiledCountSeq = 0;
+function visibleUnfiledHomeCount(){
+  if(unfiledHomeCount===null) return 0;
+  const hiddenIds=new Set([...hiddenAlbums].map(String));
+  const softDeleted=phoneTrash.filter(t=>!t.albumId||hiddenIds.has(String(t.albumId))).length;
+  return Math.max(0,unfiledHomeCount-softDeleted);
+}
+function refreshUnfiledHomeCount(force){
+  const el=$("#unfiledCount");
+  if(!BRIDGE||!BRIDGE.readUnfiledCountAsync){ if(el&&unfiledTotal>0) el.textContent=unfiledTotal+" 张"; return; }
+  const key=JSON.stringify([...hiddenAlbums].map(String).sort())+"|"+mediaStoreToken(!!force);
+  if(!force&&unfiledHomeCount!==null&&unfiledCountKey===key){ if(el)el.textContent=visibleUnfiledHomeCount()+" 张"; return; }
+  const seq=++unfiledCountSeq;
+  const cb=nativeCallback("unfiledCount",raw=>{
+    if(seq!==unfiledCountSeq)return;
+    const n=parseInt(raw,10);
+    unfiledHomeCount=Number.isFinite(n)?Math.max(0,n):0; unfiledCountKey=key;
+    const target=$("#unfiledCount"); if(target)target.textContent=visibleUnfiledHomeCount()+" 张";
+  });
+  BRIDGE.readUnfiledCountAsync(JSON.stringify([...hiddenAlbums]),cb);
+}
 function saveHidden(){
   try{ localStorage.setItem("pp_hidden", JSON.stringify([...hiddenAlbums])); }catch(e){}
   phoneMediaCache.delete("unfiled"); phonePageState.delete("unfiled"); unfiledTotal=0;
+  unfiledHomeCount=null; unfiledCountKey=""; ++unfiledCountSeq;
   try{ if(db) db.transaction("phonecache","readwrite").objectStore("phonecache").delete("unfiled"); }catch(e){}
 }
 async function refreshTrash(){

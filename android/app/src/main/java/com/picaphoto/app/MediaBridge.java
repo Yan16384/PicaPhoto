@@ -912,6 +912,56 @@ public class MediaBridge {
         });
     }
 
+    /** 首页只需要数量，不解码缩略图也不构造媒体 JSON。 */
+    @JavascriptInterface
+    public void readUnfiledCountAsync(final String hiddenJson, final String cb) {
+        io.execute(() -> {
+            int count = 0;
+            Cursor c = null;
+            try {
+                boolean img = hasImagePermission(), vid = hasVideoPermission();
+                if (!img && !vid) { callJs(cb, "0"); return; }
+                Uri files = Build.VERSION.SDK_INT >= 29
+                        ? MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                        : MediaStore.Files.getContentUri("external");
+                List<String> args = new ArrayList<>();
+                StringBuilder sel = new StringBuilder("(")
+                        .append(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME).append(" IS NULL OR ")
+                        .append(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME).append("=''");
+                try {
+                    JSONArray hid = new JSONArray(hiddenJson == null ? "[]" : hiddenJson);
+                    if (hid.length() > 0) {
+                        sel.append(" OR ").append(MediaStore.MediaColumns.BUCKET_ID).append(" IN (");
+                        for (int i = 0; i < hid.length(); i++) {
+                            if (i > 0) sel.append(",");
+                            sel.append("?"); args.add(hid.getString(i));
+                        }
+                        sel.append(")");
+                    }
+                } catch (Exception ignored) {}
+                sel.append(") AND (");
+                if (img) {
+                    sel.append(MediaStore.Files.FileColumns.MEDIA_TYPE).append("=?");
+                    args.add(String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE));
+                }
+                if (vid) {
+                    if (img) sel.append(" OR ");
+                    sel.append(MediaStore.Files.FileColumns.MEDIA_TYPE).append("=?");
+                    args.add(String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO));
+                }
+                sel.append(")");
+                c = activity.getContentResolver().query(files,
+                        new String[]{MediaStore.MediaColumns._ID}, sel.toString(), args.toArray(new String[0]), null);
+                if (c != null) count = c.getCount();
+            } catch (Exception ignored) {
+                count = 0;
+            } finally {
+                try { if (c != null) c.close(); } catch (Exception ignored) {}
+            }
+            callJs(cb, String.valueOf(count));
+        });
+    }
+
     private String readUnfiledPageAfterSync(String hiddenJson, long beforeDate, long beforeId, int limit) {
         JSONObject out = new JSONObject();
         JSONArray arr = new JSONArray();
