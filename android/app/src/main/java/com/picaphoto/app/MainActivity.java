@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url.startsWith("file://") || url.startsWith("content://") || url.startsWith("https://picaphoto.local/thumb/")) return false;
+                if (url.startsWith("file://") || url.startsWith("content://") || url.startsWith("https://picaphoto.local/")) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                 } catch (Exception ignored) {}
@@ -183,6 +183,10 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == MediaBridge.WRITE_REQ || requestCode == MediaBridge.WRITE_BATCH_REQ) {
             if (bridge != null) bridge.onActivityResult(requestCode, resultCode);
+            return;
+        }
+        if (requestCode == MediaBridge.TRASH_REQ) {
+            if (bridge != null) bridge.onTrashResult(resultCode == RESULT_OK);
             return;
         }
         if (requestCode == MediaBridge.DELETE_REQ) {

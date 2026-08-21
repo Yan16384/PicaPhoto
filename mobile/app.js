@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.10";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.11";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -101,6 +101,13 @@ function objURL(m){
   if(urls.has(m.id)) return urls.get(m.id);
   if(!m.blob) return "";
   const u=URL.createObjectURL(m.blob); urls.set(m.id,u); return u;
+}
+function mediaSrcOf(m){
+  if(!m) return "";
+  if(m.uri&&String(m.uri).startsWith("content:")&&!isVideo(m)&&BRIDGE&&BRIDGE.getMediaViewUrl){
+    try{return BRIDGE.getMediaViewUrl(String(m.uri))||m.uri;}catch(e){}
+  }
+  return objURL(m);
 }
 function revokeObj(id){ if(urls.has(id)){ try{ URL.revokeObjectURL(urls.get(id)); }catch(e){} urls.delete(id); } }
 function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -394,6 +401,13 @@ function refreshPhoneAlbums(force){
     albumsRefreshInFlight=false;
     if(!phoneAlbums.length) phoneAlbums=[];
   }
+}
+function settlePhoneAlbumsAfterMutation(){
+  mediaTokenCache={t:0,v:""};
+  try{localStorage.removeItem("pp_albums_cache");}catch(e){}
+  [0,350,1400].forEach(delay=>setTimeout(()=>{
+    try{refreshPhoneAlbums(true);if(tab==="org"&&orgSub==="home")renderHome();}catch(e){}
+  },delay));
 }
 function filterPhoneItems(items){
   return (items||[]).filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri));
@@ -1525,7 +1539,8 @@ function nativeMove(name, list, target){
           const item=removed.find(m=>m.uri===r.uri);
           return item ? {item:item,from:r.from} : null;
         }).filter(Boolean);
-        if(undoItems.length) moveUndoStack.push({items:undoItems,name:name});
+        /* 每张照片一个撤销记录：连续点撤销时逐张恢复，不把整批一次撤回。 */
+        undoItems.forEach(x=>moveUndoStack.push({items:[x],name:name}));
         syncViewerActions();
       }
       if(fail>0){
@@ -1538,12 +1553,12 @@ function nativeMove(name, list, target){
       } else {
         toast("已移入「"+name+"」"+ok+" 项", undoItems.length ? "撤销" : "", undoItems.length ? undoLastMove : null);
       }
-      if(ok>0 && BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true);
+      if(ok>0 && BRIDGE && BRIDGE.hasPermission) settlePhoneAlbumsAfterMutation();
     });
     requestNativeAlbumMove(name,target,uris,moveCb);
     /* 后台等 MediaStore 更新后再刷新相册计数 */
     setTimeout(()=>{
-      try{ if(BRIDGE && BRIDGE.hasPermission) refreshPhoneAlbums(true); if(orgSub==="home") renderHome(); }catch(e){}
+      try{ if(BRIDGE && BRIDGE.hasPermission) settlePhoneAlbumsAfterMutation(); }catch(e){}
     }, 1500);
   } catch(e){ toast("移动失败："+e); }
 }
@@ -1582,15 +1597,17 @@ async function removeSelected(){
   if(!list.length) return;
   /* 移入回收站无需确认（可恢复）；一次性全部消失（一起飞走再移除，不是一张张变少） */
   if(phoneAlbum!==null){
-    for(const m of list){ await trashPhone(m); }
-    list.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el) el.classList.add("flyout-up"); });
+    if(!await setSystemTrash(list.map(m=>m.uri),true)){toast("未能移入系统回收站");return;}
+    const moved=[];
+    for(const m of list){ if(await trashPhone(m,true)) moved.push(m); }
+    moved.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el) el.classList.add("flyout-up"); });
     await new Promise(r=>setTimeout(r,150));
-    list.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el){ el.remove(); phEls.delete(itemKey(m)); } });
+    moved.forEach(m=>{ const el=phEls.get(itemKey(m)); if(el){ el.remove(); phEls.delete(itemKey(m)); } });
     exitMulti();
     renderPhotos(true);
     await refreshTrash();
     refreshPhoneAlbums();
-    toast("已移入回收站 "+list.length+" 项");
+    toast("已移入系统回收站 "+moved.length+" 项");
     return;
   }
   const ids = [...selection].filter(k => k && !k.startsWith("content:"));
@@ -1687,8 +1704,17 @@ function sheetTrashItem(m){
   sheet([{ic:"↩️",t:"恢复",f:()=>restoreFromTrash(m)},
           {ic:"🗑️",t:"彻底删除",f:()=>permanentDelete(m)}],"回收站操作");
 }
-/* 手机照片移入回收站：只做 App 内标记，系统文件不动 */
-async function trashPhone(m){
+function setSystemTrash(uris,trashed){
+  if(!BRIDGE||!BRIDGE.trashMediaAsync) return Promise.resolve(true);
+  return new Promise(resolve=>{
+    const cb=nativeCallback(trashed?"systemTrash":"systemRestore",raw=>resolve(String(raw)==="true"));
+    try{BRIDGE.trashMediaAsync(JSON.stringify(uris),!!trashed,cb);}catch(e){resolve(false);}
+  });
+}
+/* 手机照片同时进入 Android 系统回收站，App 只保存恢复所需索引。 */
+async function trashPhone(m,systemDone){
+  const systemOk=systemDone||await setSystemTrash([m.uri],true);
+  if(!systemOk){toast("未能移入系统回收站");return false;}
   const rec={id:"p_"+m.uri, uri:m.uri, name:m.name, mime:m.mime||m.type||"", isVideo:!!((m.mime||m.type)||"").startsWith("video/"), trashedAt:Date.now(), fromPhone:true, albumId:m.albumId||null};
   await storePut("trash", rec);
   trashedUris.add(m.uri);
@@ -1696,9 +1722,11 @@ async function trashPhone(m){
   markPhDirty();
   trashUndoStack.push({type:"phone", uri:m.uri, id:rec.id});
   recordStats("trash",1);
+  return true;
 }
 async function restoreFromTrash(m){
   if(m.fromPhone){
+    if(!await setSystemTrash([m.uri],false)){toast("系统回收站恢复失败");return;}
     await storeDel("trash", m.id);
     trashedUris.delete(m.uri);
     recordStats("restore",1);
@@ -1730,7 +1758,7 @@ async function restoreAllTrash(){
   const apps=appTrash.slice(), ph=phoneTrash.slice();
   let n=0;
   for(const t of apps){ const obj=restoreObj(t); media.push(obj); n++; await storePut("media",obj); await storeDel("trash",t.id); }
-  for(const t of ph){ await storeDel("trash", t.id); trashedUris.delete(t.uri); n++; }
+  for(const t of ph){ if(await setSystemTrash([t.uri],false)){await storeDel("trash", t.id); trashedUris.delete(t.uri); n++;} }
   if(n) recordStats("restore", n);
   toast("已恢复 "+n+" 项");
   await refreshTrash(); renderTrash();
@@ -1784,7 +1812,7 @@ window.__deleted = async ()=>{
 /* ============ 移入回收站 / 撤销 ============ */
 async function trashOne(m){
   if(m.uri && m.uri.startsWith("content:")){
-    await trashPhone(m);
+    if(!await trashPhone(m)) return false;
     toastTrash();
   } else {
     const tr={id:m.id, name:m.name, mime:m.type||"", isVideo:!!(m.type||"").startsWith("video/"), trashedAt:Date.now(), blob:m.blob};
@@ -1796,12 +1824,14 @@ async function trashOne(m){
     toastTrash();
   }
   await refreshTrash();
+  return true;
 }
 function toastTrash(){ toast("已移入回收站","撤销",()=>undoTrash()); }
 async function undoTrash(){
   const t=trashUndoStack.pop();
   if(!t) return;
   if(t.type==="phone"){
+    if(!await setSystemTrash([t.uri],false)){trashUndoStack.push(t);toast("系统回收站恢复失败");return;}
     await storeDel("trash", t.id || ("p_"+t.uri));
     trashedUris.delete(t.uri);
     recordStats("restore",1);
@@ -1825,7 +1855,7 @@ async function undoTrash(){
 
 /* ============ 全屏查看器（窗口化渲染 + 邻居预加载） ============ */
 let viewerList=[], viewerIdx=0, viewerMode="normal";
-let g=null, longT=null, lastTap=0, zoomed=false, pinch=0;
+let g=null, longT=null, lastTap=0, zoomed=false, pinch=0, pinchBase=1, pinchScale=1;
 let vSlots=[]; const VWIN=2;
 
 function restoreViewerItem(item,index){
@@ -1836,7 +1866,7 @@ function restoreViewerItem(item,index){
 }
 
 function openViewer(list, idx, mode){
-  viewerList=list; viewerIdx=idx; viewerMode=mode||"normal"; zoomed=false; lastTap=0;
+  viewerList=list; viewerIdx=idx; viewerMode=mode||"normal"; zoomed=false; pinchScale=1; lastTap=0;
   $("#viewer").classList.add("open");
   applyVWork();
   buildSlides();
@@ -1899,7 +1929,7 @@ function buildSlides(){
   preloadIdx(viewerIdx-VWIN-1);
 }
 function setSlideContent(el, m, current){
-  const src=objURL(m);
+  const src=mediaSrcOf(m);
   if(isVideo(m)){
     delete el.dataset.mediaSrc; delete el.dataset.thumbSrc;
     let v=el.querySelector("video");
@@ -1943,8 +1973,8 @@ function updateViewerChrome(){
       const i=viewerList.indexOf(mm); if(i>=0) viewerList.splice(i,1); afterViewerRemove();
     });
   } else {
-    let chips='<div class="vchip new" id="vNew">＋ 新建</div>';
-    albumTargets().forEach(a=>{ chips+='<div class="vchip" data-alb="'+escapeHtml(a.name)+'" data-albid="'+escapeHtml(String(a.id||""))+'">'+escapeHtml(a.name)+'</div>'; });
+    let chips='<div class="vchip new" id="vNew">＋ 新建相册</div>';
+    albumTargets().forEach(a=>{ chips+='<div class="vchip" data-alb="'+escapeHtml(a.name)+'" data-albid="'+escapeHtml(String(a.id||""))+'">📁 '+escapeHtml(a.name)+'</div>'; });
     work.innerHTML='<div class="vw-albums">'+chips+'</div>';
     work.querySelectorAll(".vchip").forEach(c=>{
       c.addEventListener("click", ()=>{
@@ -2037,7 +2067,7 @@ function moveViewer(step){
   if(step>0 && viewerIdx>=viewerList.length-4) maybeLoadViewerPage();
   const ni=Math.max(0,Math.min(viewerList.length-1,viewerIdx+step));
   if(ni===viewerIdx){ setTrack(0,0,1,true); return; }
-  viewerIdx=ni; zoomed=false;
+  viewerIdx=ni; zoomed=false; pinchScale=1;
   clearZoomAll();
   buildSlides();
   setTrack(0,0,1,true);
@@ -2066,6 +2096,7 @@ async function moveCurrentTo(name,target){
           syncViewerActions();
           toast("已移入「"+name+"」", res[0].from ? "撤销" : "", res[0].from ? undoLastMove : null);
           updateFabDone();
+          settlePhoneAlbumsAfterMutation();
           afterViewerRemove();
         } else {
           /* 恢复 */
@@ -2091,6 +2122,7 @@ async function moveCurrentTo(name,target){
 $("#vPreview").addEventListener("touchstart", e=>{
   if(e.touches.length>1){
     pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    pinchBase=zoomed?pinchScale:1;
     g=null; clearTimeout(longT);
     return;
   }
@@ -2111,7 +2143,13 @@ $("#vPreview").addEventListener("touchstart", e=>{
 $("#vPreview").addEventListener("touchmove", e=>{
   if(e.touches.length>1){
     const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
-    if(pinch>0 && Math.abs(d-pinch)>50){ pinch=0; closeViewer(); return; }
+    if(pinch>0){
+      pinchScale=Math.max(1,Math.min(4,pinchBase*d/pinch));
+      zoomed=pinchScale>1.03;
+      const s=vSlots.find(x=>x.idx===viewerIdx);
+      if(s){s.el.classList.toggle("zoomed",zoomed);s.el.style.setProperty("--zoom",String(pinchScale));}
+      e.preventDefault();
+    }
     return;
   }
   if(!g) return;
@@ -2143,7 +2181,7 @@ $("#vPreview").addEventListener("touchmove", e=>{
 
 $("#vPreview").addEventListener("touchend", e=>{
   clearTimeout(longT);
-  if(!g) return;
+  if(!g){pinch=0;return;}
   const g0=g; g=null;
   const cur=vSlots.find(s=>s.idx===viewerIdx);
   if(cur) cur.el.classList.remove("peek");
@@ -2172,7 +2210,8 @@ $("#vPreview").addEventListener("touchend", e=>{
     if(now-lastTap<300){
       zoomed=!zoomed;
       const s=vSlots.find(x=>x.idx===viewerIdx);
-      if(s) s.el.classList.toggle("zoomed", zoomed);
+      pinchScale=zoomed?2.2:1;
+      if(s){s.el.classList.toggle("zoomed",zoomed);s.el.style.setProperty("--zoom",String(pinchScale));}
       lastTap=0;
     } else {
       lastTap=now;   // 修复：记录单次轻触时间，双击缩放才生效
@@ -2212,7 +2251,11 @@ async function doTrashCurrent(){
   const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   afterViewerRemove();
   if(viewerMode==="trash"){ await permanentDelete(m); }
-  else { await trashOne(m); const top=trashUndoStack[trashUndoStack.length-1]; if(top){top.item=m;top.viewerIndex=i;} }
+  else {
+    const ok=await trashOne(m);
+    if(!ok){viewerList.splice(Math.max(0,i),0,m);viewerIdx=Math.max(0,i);buildSlides();setTrack(0,0,1,false);updateViewerChrome();return;}
+    const top=trashUndoStack[trashUndoStack.length-1]; if(top){top.item=m;top.viewerIndex=i;}
+  }
 }
 function quickOrganizeCurrent(){
   doTrashCurrent();
@@ -2396,7 +2439,7 @@ let phLongKey=null, phLongT=null, phLongSuppress=false;
 function showPhPreview(m){
   const p=$("#phPreview");
   if(!p) return;
-  p.innerHTML='<img src="'+imgSrcOf(m)+'" alt="">';
+  p.innerHTML='<img src="'+mediaSrcOf(m)+'" alt="">';
   p.classList.add("show");
 }
 function hidePhPreview(){ const p=$("#phPreview"); if(p) p.classList.remove("show"); }

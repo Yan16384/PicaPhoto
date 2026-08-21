@@ -64,12 +64,14 @@ public class MediaBridge {
     public static final int WRITE_REQ = 2003;
     public static final int WRITE_BATCH_REQ = 2004;
     public static final int MANAGE_MEDIA_PREP_REQ = 2005;
+    public static final int TRASH_REQ = 2006;
     private long pendingId = -1;
     private List<Uri> pendingDeleteUris = new ArrayList<>();
     private File lastApk = null;
     private BroadcastReceiver receiver = null;
     private PendingMove pendingMove = null;
     private String pendingWriteBatchCallback = null;
+    private String pendingTrashCallback = null;
 
     private static final class PendingMove {
         final String jsonUris;
@@ -745,6 +747,15 @@ public class MediaBridge {
             if (uri == null || !"https".equalsIgnoreCase(uri.getScheme()) ||
                     !"picaphoto.local".equalsIgnoreCase(uri.getHost())) return null;
             String path = uri.getPath();
+            if ("/media".equals(path)) {
+                String source = uri.getQueryParameter("uri");
+                if (source == null || !source.startsWith("content://")) return null;
+                Uri content = Uri.parse(source);
+                InputStream in = activity.getContentResolver().openInputStream(content);
+                if (in == null) return null;
+                String mime = activity.getContentResolver().getType(content);
+                return new WebResourceResponse(mime == null ? "image/jpeg" : mime, null, in);
+            }
             if (path == null || !path.startsWith("/thumb/")) return null;
             String name = path.substring("/thumb/".length());
             if (!name.matches("[0-9a-fA-F]+\\.jpg")) return null;
@@ -755,6 +766,16 @@ public class MediaBridge {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    /** 通过 WebViewClient 安全地流式读取原图，避免 content:// 加载失败后一直停在低清缩略图。 */
+    @JavascriptInterface
+    public String getMediaViewUrl(String uriStr) {
+        try {
+            if (uriStr == null || !uriStr.startsWith("content://")) return uriStr == null ? "" : uriStr;
+            return new Uri.Builder().scheme("https").authority("picaphoto.local").path("media")
+                    .appendQueryParameter("uri", uriStr).build().toString();
+        } catch (Exception ignored) { return uriStr == null ? "" : uriStr; }
     }
 
     private String getOrCreateMediaThumbUri(String uriStr, long suppliedVersion) {
@@ -1549,6 +1570,43 @@ public class MediaBridge {
     @JavascriptInterface
     public String getAppVersion() {
         try { return BuildConfig.VERSION_NAME; } catch (Exception e) { return ""; }
+    }
+
+    /** 移入/移出 Android 系统回收站，系统相册可见并可恢复。 */
+    @JavascriptInterface
+    public void trashMediaAsync(final String jsonUris, final boolean trashed, final String cb) {
+        if (Build.VERSION.SDK_INT < 30) { callJs(cb, "false"); return; }
+        io.execute(() -> {
+            ArrayList<Uri> denied = new ArrayList<>();
+            try {
+                JSONArray arr = new JSONArray(jsonUris);
+                for (int i = 0; i < arr.length(); i++) {
+                    Uri u = Uri.parse(arr.getString(i));
+                    try {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.MediaColumns.IS_TRASHED, trashed ? 1 : 0);
+                        if (activity.getContentResolver().update(u, values, null, null) <= 0) denied.add(u);
+                    } catch (SecurityException e) { denied.add(u); }
+                }
+            } catch (Exception e) { callJs(cb, "false"); return; }
+            if (denied.isEmpty()) { callJs(cb, "true"); return; }
+            activity.runOnUiThread(() -> {
+                try {
+                    if (pendingTrashCallback != null) { callJs(cb, "false"); return; }
+                    pendingTrashCallback = cb;
+                    PendingIntent pi = MediaStore.createTrashRequest(activity.getContentResolver(), denied, trashed);
+                    activity.startIntentSenderForResult(pi.getIntentSender(), TRASH_REQ, null, 0, 0, 0);
+                } catch (Exception e) {
+                    String callback = pendingTrashCallback; pendingTrashCallback = null;
+                    callJs(callback == null ? cb : callback, "false");
+                }
+            });
+        });
+    }
+
+    public void onTrashResult(boolean granted) {
+        String cb = pendingTrashCallback; pendingTrashCallback = null;
+        callJs(cb, granted ? "true" : "false");
     }
 
     /* 真正删除系统照片（Android 10+ 系统确认） */
