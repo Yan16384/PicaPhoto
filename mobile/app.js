@@ -2,7 +2,7 @@
 /* ============ PicaPhoto 移动版 · Performance V2 ============ */
 /* 原生桥接 */
 const BRIDGE = (typeof window !== "undefined" && window.Android) || null;
-const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.11";
+const APP_VERSION = (BRIDGE && BRIDGE.getAppVersion && BRIDGE.getAppVersion()) || "2.0.12";
 const GITHUB_API = "https://api.github.com/repos/Yan16384/PicaPhoto/releases/latest";
 let phoneAlbums = [];
 let phoneAlbum = null;        // 当前浏览的手机相册 bucket id
@@ -225,6 +225,9 @@ function fmtBytes(n){
 
 /* ============ 手机相册（原生桥接） ============ */
 let phoneMediaCache = new Map();
+/* MediaStore 移动与相册查询是异步的。按来源相册保留已移出 URI，防止较早发起的
+   查询在移动成功后返回旧快照，把照片重新写回来源相册；目标相册不受影响。 */
+let movedOutByAlbum = new Map();
 const PHONE_CACHE_TTL = 30*24*3600*1000; // generation 不可用时的兼容兜底
 const PHONE_CACHE_MAX = 32;               // 只保留最近使用的相册，避免内存无限增长
 let albumsRefreshInFlight=false;
@@ -262,7 +265,7 @@ function stripHeavyThumbs(items){
 }
 function putAlbumCache(id, items, token, state){
   if(!id || id==="unfiled" || !db) return;
-  const clean=stripHeavyThumbs(items);
+  const clean=stripHeavyThumbs(filterPhoneItems(items,id));
   const st=state||phonePageState.get(id)||{};
   try{
     db.transaction("phonecache","readwrite").objectStore("phonecache")
@@ -273,7 +276,7 @@ function putAlbumCache(id, items, token, state){
   }catch(e){}
 }
 function rememberAlbum(id, items, token, state){
-  const clean=stripHeavyThumbs(items);
+  const clean=stripHeavyThumbs(filterPhoneItems(items,id));
   const st=state||{};
   phoneMediaCache.set(id,{t:Date.now(),token:token||mediaStoreToken(),items:clean,
                           nextOffset:st.nextOffset!=null?st.nextOffset:clean.length,
@@ -409,8 +412,21 @@ function settlePhoneAlbumsAfterMutation(){
     try{refreshPhoneAlbums(true);if(tab==="org"&&orgSub==="home")renderHome();}catch(e){}
   },delay));
 }
-function filterPhoneItems(items){
-  return (items||[]).filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri));
+function phoneAlbumKey(id){ return id===null||id===undefined ? "" : String(id); }
+function rememberMovedOut(id,uris){
+  const key=phoneAlbumKey(id); if(!key) return;
+  let set=movedOutByAlbum.get(key);
+  if(!set){ set=new Set(); movedOutByAlbum.set(key,set); }
+  for(const uri of (uris||[])) if(uri) set.add(uri);
+}
+function forgetMovedOut(id,uris){
+  const key=phoneAlbumKey(id),set=movedOutByAlbum.get(key); if(!set) return;
+  for(const uri of (uris||[])) set.delete(uri);
+  if(!set.size) movedOutByAlbum.delete(key);
+}
+function filterPhoneItems(items,albumId){
+  const moved=movedOutByAlbum.get(phoneAlbumKey(albumId!==undefined?albumId:phoneAlbum));
+  return (items||[]).filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri) && !(moved&&moved.has(x.uri)));
 }
 function sortPhoneItems(arr){
   return (arr||[]).slice().sort((a,b)=>((b.dateAdded||0)-(a.dateAdded||0)) || String(b.uri||"").localeCompare(String(a.uri||"")));
@@ -484,10 +500,10 @@ function readPhoneMedia(id, cb){
                      hasMore:!!page.hasMore,complete:!page.hasMore,loading:false,token};
         const items=sortPhoneItems(stripHeavyThumbs(page.items));
         rememberAlbum("unfiled",items,token,state);
-        unfiledTotal=state.complete?filterPhoneItems(items).length:0;
-        if(!silent) cb&&cb(filterPhoneItems(items));
+        unfiledTotal=state.complete?filterPhoneItems(items,"unfiled").length:0;
+        if(!silent) cb&&cb(filterPhoneItems(items,"unfiled"));
         else if(phoneAlbum==="unfiled"&&tab==="org"&&orgSub==="photos"){
-          phoneMedia=filterPhoneItems(items); markPhDirty(); renderPhotos(true);
+          phoneMedia=filterPhoneItems(items,"unfiled"); markPhDirty(); renderPhotos(true);
         }
       });
     };
@@ -496,7 +512,7 @@ function readPhoneMedia(id, cb){
                    beforeDate:mem.beforeDate!=null?mem.beforeDate:-1,beforeId:mem.beforeId!=null?mem.beforeId:-1,
                    hasMore:!!mem.hasMore,complete:mem.complete===true,loading:false,token:mem.token||""};
       phonePageState.set("unfiled",state);
-      cb&&cb(filterPhoneItems(mem.items));
+      cb&&cb(filterPhoneItems(mem.items,"unfiled"));
       const stale=currentToken2?(!mem.token||currentToken2!==mem.token):(Date.now()-(mem.t||0)>120000);
       if(stale) refreshFirst(true);
       return;
@@ -508,7 +524,7 @@ function readPhoneMedia(id, cb){
   const deliver=(items,token,state)=>{
     items=sortPhoneItems(stripHeavyThumbs(items));
     rememberAlbum(id,items,token||mediaStoreToken(),state);
-    cb && cb(filterPhoneItems(items));
+    cb && cb(filterPhoneItems(items,id));
   };
   const refreshFirst=silent=>{
     const st=phonePageState.get(id)||{};
@@ -523,9 +539,9 @@ function readPhoneMedia(id, cb){
       const items=sortPhoneItems(stripHeavyThumbs(page.items));
       rememberAlbum(id,items,token,state);
       putAlbumCache(id,items,token,state);
-      if(!silent) cb && cb(filterPhoneItems(items));
+      if(!silent) cb && cb(filterPhoneItems(items,id));
       else if(phoneAlbum===id && tab==="org" && orgSub==="photos"){
-        phoneMedia=filterPhoneItems(items);
+        phoneMedia=filterPhoneItems(items,id);
         markPhDirty();
         renderPhotos(true);
       }
@@ -538,7 +554,7 @@ function readPhoneMedia(id, cb){
                  beforeDate:mem.beforeDate!=null?mem.beforeDate:-1,beforeId:mem.beforeId!=null?mem.beforeId:-1,
                  hasMore:!!mem.hasMore,complete:mem.complete===true,loading:false,token:mem.token||""};
     phonePageState.set(id,state);
-    cb && cb(filterPhoneItems(mem.items));
+    cb && cb(filterPhoneItems(mem.items,id));
     const stale=currentToken ? (!mem.token || currentToken!==mem.token)
                              : (Date.now()-(mem.t||0)>PHONE_CACHE_TTL);
     if(stale) refreshFirst(true);
@@ -576,7 +592,7 @@ function loadMorePhoneMedia(done){
     cur.loading=false;
     if(seq!==albumOpenSeq || phoneAlbum!==id){ phonePageState.set(id,cur); if(done) done(0); return; }
     const existing=new Set(phoneMedia.map(x=>x.uri));
-    const add=filterPhoneItems(stripHeavyThumbs(page.items)).filter(x=>!existing.has(x.uri));
+    const add=filterPhoneItems(stripHeavyThumbs(page.items),id).filter(x=>!existing.has(x.uri));
     if(add.length) phoneMedia.push(...add);
     /* keyset/cursor pagination: native nextOffset is page-local; JS keeps a cumulative count for cache metadata/fallbacks. */
     cur.nextOffset=offset+(page.items||[]).length;
@@ -599,7 +615,7 @@ function readPhoneMediaAll(id,cb){
   if(id==="unfiled"&&BRIDGE&&BRIDGE.readUnfiledAsync){
     const cbName=nativeCallback("unfiledAll",raw=>{
       let items=[];try{items=JSON.parse(raw||"[]");}catch(e){}
-      cb&&cb(filterPhoneItems(sortPhoneItems(items)));
+      cb&&cb(filterPhoneItems(sortPhoneItems(items),id));
     });
     BRIDGE.readUnfiledAsync(JSON.stringify([...hiddenAlbums]),cbName);
     return;
@@ -609,14 +625,14 @@ function readPhoneMediaAll(id,cb){
   if(!canPage){ readPhoneMedia(id,cb); return; }
   const all=[]; let guard=0;
   const next=state=>{
-    if(guard++>10000){ cb&&cb(filterPhoneItems(sortPhoneItems(all))); return; }
+    if(guard++>10000){ cb&&cb(filterPhoneItems(sortPhoneItems(all),id)); return; }
     const fetcher=id==="unfiled"?fetchUnfiledPage:(st,limit,done)=>fetchPhonePage(id,st,limit,done);
     fetcher(state,PHONE_ALL_PAGE_SIZE,page=>{
       all.push(...(page.items||[]));
       const ns={nextOffset:(state.nextOffset||0)+(page.items||[]).length,
                 beforeDate:page.nextBeforeDate!=null?page.nextBeforeDate:-1,beforeId:page.nextBeforeId!=null?page.nextBeforeId:-1};
       if(page.hasMore&&ns.beforeDate>=0&&ns.beforeId>=0) next(ns);
-      else cb&&cb(filterPhoneItems(sortPhoneItems(all)));
+      else cb&&cb(filterPhoneItems(sortPhoneItems(all),id));
     });
   };
   next({nextOffset:0,beforeDate:-1,beforeId:-1});
@@ -676,7 +692,7 @@ function openPhoneAlbum(id, name){
   const c=phoneMediaCache.get(id);
   if(c && c.items){
     phoneAlbumLoading=false;
-    phoneMedia=c.items.filter(x=>!trashedUris.has(x.uri) && !pendingMoves.has(x.uri));
+    phoneMedia=filterPhoneItems(c.items,id);
     if(id==="unfiled") unfiledTotal=(c.complete===true)?phoneMedia.length:0;
   } else {
     phoneAlbumLoading=true;
@@ -1509,6 +1525,7 @@ function requestNativeAlbumMove(name,target,jsonUris,cb){
 function nativeMove(name, list, target){
   if(!list || !list.length) return;
   try {
+    const sourceAlbumId=phoneAlbum!==null ? phoneAlbum : (list[0]&&list[0].albumId);
     const uris = JSON.stringify(list.map(m=>m.uri));
     /* 乐观移入：先从当前网格移除对应 DOM（不重建，其他照片不重新加载），后台慢慢移动，失败自动恢复 */
     const removed=[];
@@ -1519,7 +1536,7 @@ function nativeMove(name, list, target){
     }
     appendPhonePageToGrid();
     exitMulti();
-    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ for(const m of removed) phoneMedia.push(m); renderPhotos(true); toast("移动失败"); return; }
+    if(!BRIDGE || (!BRIDGE.moveToAlbumAsync && !(target&&target.id&&BRIDGE.moveToAlbumIdAsync))){ for(const m of removed) phoneMedia.push(m); renderPhotos(true); toast("移动失败"); return; }
     const moveCb=nativeCallback("move", resJson => {
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       const ok=res.filter(r=>r.ok).length, fail=res.length-ok;
@@ -1529,10 +1546,16 @@ function nativeMove(name, list, target){
         rememberRecentAlbum(name);
         const okUris=new Set(res.filter(r=>r.ok).map(r=>r.uri));
         removed.filter(m=>okUris.has(m.uri)).forEach(markReviewed);
-        const sourceId=(phoneAlbum && phoneAlbum!=="unfiled") ? phoneAlbum : (removed[0]&&removed[0].albumId);
-        if(sourceId) removeUrisFromCachedAlbum(sourceId,okUris);
-        else phoneMediaCache.delete("unfiled");
         const targetAlbum=target||phoneAlbums.find(a=>a.name===name);
+        const sameAlbum=targetAlbum&&targetAlbum.id&&phoneAlbumKey(targetAlbum.id)===phoneAlbumKey(sourceAlbumId);
+        if(!sameAlbum) rememberMovedOut(sourceAlbumId,okUris);
+        if(phoneAlbumKey(sourceAlbumId)==="unfiled") invalidateAlbumCache("unfiled");
+        else if(sourceAlbumId) removeUrisFromCachedAlbum(sourceAlbumId,okUris);
+        if(phoneAlbumKey(phoneAlbum)===phoneAlbumKey(sourceAlbumId)){
+          const before=phoneMedia.length;
+          phoneMedia=filterPhoneItems(phoneMedia,sourceAlbumId);
+          if(phoneMedia.length!==before){ markPhDirty(); renderPhotos(true); }
+        }
         if(targetAlbum) invalidateAlbumCache(targetAlbum.id);
         try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
         const undoItems=res.filter(r=>r.ok && r.from).map(r=>{
@@ -1540,7 +1563,7 @@ function nativeMove(name, list, target){
           return item ? {item:item,from:r.from} : null;
         }).filter(Boolean);
         /* 每张照片一个撤销记录：连续点撤销时逐张恢复，不把整批一次撤回。 */
-        undoItems.forEach(x=>moveUndoStack.push({items:[x],name:name}));
+        undoItems.forEach(x=>moveUndoStack.push({items:[x],name:name,sourceAlbumId:sourceAlbumId}));
         syncViewerActions();
       }
       if(fail>0){
@@ -1573,6 +1596,7 @@ function undoLastMove(){
     const cb=nativeCallback("undoMove", raw=>{
       let res=[]; try{res=JSON.parse(raw);}catch(e){}
       const okUris=new Set(res.filter(r=>r.ok).map(r=>r.uri));
+      forgetMovedOut(move.sourceAlbumId,okUris);
       restored+=okUris.size; failed+=res.length-okUris.size;
       items.forEach(x=>{ if(!okUris.has(x.item.uri)) failedItems.push(x); });
       items.forEach(x=>{
@@ -1582,7 +1606,7 @@ function undoLastMove(){
       });
       pending--;
       if(!pending){
-        if(failedItems.length) moveUndoStack.push({items:failedItems,name:move.name});
+        if(failedItems.length) moveUndoStack.push({items:failedItems,name:move.name,sourceAlbumId:move.sourceAlbumId});
         if(restored){ const focus=items.find(x=>okUris.has(x.item.uri)&&Number.isInteger(x.viewerIndex)); if(focus) restoreViewerItem(focus.item,focus.viewerIndex); else renderPhotos(true); }
         refreshPhoneAlbums(true);
         syncViewerActions();
@@ -2006,6 +2030,7 @@ function moveOutCurrent(name){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(!m.uri || !m.uri.startsWith("content:")){ toast("仅系统相册照片支持移出"); return; }
+  const sourceAlbumId=phoneAlbum!==null ? phoneAlbum : m.albumId;
   /* 乐观移出 */
   const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
   const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
@@ -2018,10 +2043,12 @@ function moveOutCurrent(name){
       let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       if(res[0]&&res[0].ok){
         recordStats("move",1);
-        const sourceId=(m.albumId || (phoneAlbum!=="unfiled"?phoneAlbum:null));
-        if(sourceId) removeUrisFromCachedAlbum(sourceId,[m.uri]); else phoneMediaCache.delete("unfiled");
+        rememberMovedOut(sourceAlbumId,[m.uri]);
+        if(phoneAlbumKey(sourceAlbumId)==="unfiled") invalidateAlbumCache("unfiled");
+        else if(sourceAlbumId) removeUrisFromCachedAlbum(sourceAlbumId,[m.uri]);
+        if(phoneAlbumKey(phoneAlbum)===phoneAlbumKey(sourceAlbumId)) phoneMedia=filterPhoneItems(phoneMedia,sourceAlbumId);
         try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
-        if(res[0].from) moveUndoStack.push({items:[{item:m,from:res[0].from}],name:name});
+        if(res[0].from) moveUndoStack.push({items:[{item:m,from:res[0].from}],name:name,sourceAlbumId:sourceAlbumId});
         syncViewerActions();
         toast("已移出「"+name+"」到 PicaPhoto", res[0].from ? "撤销" : "", res[0].from ? undoLastMove : null);
         updateFabDone();
@@ -2077,22 +2104,26 @@ async function moveCurrentTo(name,target){
   const m=viewerList[viewerIdx];
   if(!m) return;
   if(m.uri && m.uri.startsWith("content:")){
+    const sourceAlbumId=phoneAlbum!==null ? phoneAlbum : m.albumId;
     /* 乐观移入：立即从大图列表移除，后台移动，失败恢复 */
     const i=viewerList.indexOf(m); if(i>=0) viewerList.splice(i,1);
     const pi=phoneMedia.indexOf(m); if(pi>=0) phoneMedia.splice(pi,1);
     afterViewerRemove();
-    if(!BRIDGE || !BRIDGE.moveToAlbumAsync){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移动失败"); return; }
+    if(!BRIDGE || (!BRIDGE.moveToAlbumAsync && !(target&&target.id&&BRIDGE.moveToAlbumIdAsync))){ if(pi>=0) phoneMedia.splice(pi,0,m); if(i>=0) viewerList.splice(i,0,m); afterViewerRemove(); toast("移动失败"); return; }
     try{
       const mcCb=nativeCallback("movecurrent", resJson => {
         let res=[]; try{ res=JSON.parse(resJson); }catch(e){}
       if(res[0]&&res[0].ok){
           recordStats("move",1);
-          const sourceId=(m.albumId || (phoneAlbum!=="unfiled"?phoneAlbum:null));
-          if(sourceId) removeUrisFromCachedAlbum(sourceId,[m.uri]); else phoneMediaCache.delete("unfiled");
           const targetAlbum=target||phoneAlbums.find(a=>a.name===name);
+          const sameAlbum=targetAlbum&&targetAlbum.id&&phoneAlbumKey(targetAlbum.id)===phoneAlbumKey(sourceAlbumId);
+          if(!sameAlbum) rememberMovedOut(sourceAlbumId,[m.uri]);
+          if(phoneAlbumKey(sourceAlbumId)==="unfiled") invalidateAlbumCache("unfiled");
+          else if(sourceAlbumId) removeUrisFromCachedAlbum(sourceAlbumId,[m.uri]);
+          if(phoneAlbumKey(phoneAlbum)===phoneAlbumKey(sourceAlbumId)) phoneMedia=filterPhoneItems(phoneMedia,sourceAlbumId);
           if(targetAlbum) invalidateAlbumCache(targetAlbum.id);
           try{ localStorage.removeItem("pp_albums_cache"); }catch(e){}
-          if(res[0].from) moveUndoStack.push({items:[{item:m,from:res[0].from,viewerIndex:i}],name:name});
+          if(res[0].from) moveUndoStack.push({items:[{item:m,from:res[0].from,viewerIndex:i}],name:name,sourceAlbumId:sourceAlbumId});
           syncViewerActions();
           toast("已移入「"+name+"」", res[0].from ? "撤销" : "", res[0].from ? undoLastMove : null);
           updateFabDone();
